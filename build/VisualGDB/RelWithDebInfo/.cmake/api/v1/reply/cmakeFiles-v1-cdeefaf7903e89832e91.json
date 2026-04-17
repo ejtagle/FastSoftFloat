@@ -1,0 +1,213 @@
+{
+	"inputs" : 
+	[
+		{
+			"path" : "CMakeLists.txt"
+		},
+		{
+			"isGenerated" : true,
+			"path" : "build/VisualGDB/RelWithDebInfo/CMakeFiles/3.31.5-g5ebb63b/CMakeSystem.cmake"
+		},
+		{
+			"isGenerated" : true,
+			"path" : "build/VisualGDB/RelWithDebInfo/toolchain.cmake"
+		},
+		{
+			"isExternal" : true,
+			"path" : "C:/Program Files (x86)/Sysprogs/VisualGDB/CMake/embedded/root.cmake"
+		},
+		{
+			"isExternal" : true,
+			"path" : "C:/Program Files (x86)/Sysprogs/VisualGDB/CMake/embedded/bsp.cmake"
+		},
+		{
+			"isExternal" : true,
+			"path" : "C:/Program Files (x86)/Sysprogs/VisualGDB/CMake/embedded/coverage.cmake"
+		},
+		{
+			"isExternal" : true,
+			"path" : "C:/Program Files (x86)/Sysprogs/VisualGDB/CMake/embedded/prefixes.cmake"
+		},
+		{
+			"isExternal" : true,
+			"path" : "C:/Program Files (x86)/Sysprogs/VisualGDB/CMake/embedded/testfw.cmake"
+		},
+		{
+			"isExternal" : true,
+			"path" : "C:/Program Files (x86)/Sysprogs/VisualGDB/CMake/embedded/efp.cmake"
+		},
+		{
+			"isExternal" : true,
+			"path" : "C:/Program Files (x86)/Sysprogs/VisualGDB/CMake/embedded/resources.cmake"
+		},
+		{
+			"isExternal" : true,
+			"path" : "C:/Users/ejtagle/AppData/Local/VisualGDB/FindFrameworks.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/ejtagle/AppData/Local/VisualGDB/CMake/share/cmake-3.31/Modules/CMakeSystemSpecificInitialize.cmake"
+		},
+		{
+			"isGenerated" : true,
+			"path" : "build/VisualGDB/RelWithDebInfo/CMakeFiles/3.31.5-g5ebb63b/CMakeCCompiler.cmake"
+		},
+		{
+			"isGenerated" : true,
+			"path" : "build/VisualGDB/RelWithDebInfo/CMakeFiles/3.31.5-g5ebb63b/CMakeCXXCompiler.cmake"
+		},
+		{
+			"isGenerated" : true,
+			"path" : "build/VisualGDB/RelWithDebInfo/CMakeFiles/3.31.5-g5ebb63b/CMakeASMCompiler.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/ejtagle/AppData/Local/VisualGDB/CMake/share/cmake-3.31/Modules/CMakeSystemSpecificInformation.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/ejtagle/AppData/Local/VisualGDB/CMake/share/cmake-3.31/Modules/CMakeGenericSystem.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/ejtagle/AppData/Local/VisualGDB/CMake/share/cmake-3.31/Modules/CMakeInitializeConfigs.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/ejtagle/AppData/Local/VisualGDB/CMake/share/cmake-3.31/Modules/Platform/Generic.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/ejtagle/AppData/Local/VisualGDB/CMake/share/cmake-3.31/Modules/CMakeCInformation.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/ejtagle/AppData/Local/VisualGDB/CMake/share/cmake-3.31/Modules/CMakeLanguageInformation.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/ejtagle/AppData/Local/VisualGDB/CMake/share/cmake-3.31/Modules/Compiler/GNU-C.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/ejtagle/AppData/Local/VisualGDB/CMake/share/cmake-3.31/Modules/Compiler/GNU.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/ejtagle/AppData/Local/VisualGDB/CMake/share/cmake-3.31/Modules/Compiler/CMakeCommonCompilerMacros.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/ejtagle/AppData/Local/VisualGDB/CMake/share/cmake-3.31/Modules/Platform/Generic.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/ejtagle/AppData/Local/VisualGDB/CMake/share/cmake-3.31/Modules/CMakeCommonLanguageInclude.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/ejtagle/AppData/Local/VisualGDB/CMake/share/cmake-3.31/Modules/Internal/CMakeCLinkerInformation.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/ejtagle/AppData/Local/VisualGDB/CMake/share/cmake-3.31/Modules/Internal/CMakeCommonLinkerInformation.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/ejtagle/AppData/Local/VisualGDB/CMake/share/cmake-3.31/Modules/CMakeCXXInformation.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/ejtagle/AppData/Local/VisualGDB/CMake/share/cmake-3.31/Modules/CMakeLanguageInformation.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/ejtagle/AppData/Local/VisualGDB/CMake/share/cmake-3.31/Modules/Compiler/GNU-CXX.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/ejtagle/AppData/Local/VisualGDB/CMake/share/cmake-3.31/Modules/Compiler/GNU.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/ejtagle/AppData/Local/VisualGDB/CMake/share/cmake-3.31/Modules/Platform/Generic.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/ejtagle/AppData/Local/VisualGDB/CMake/share/cmake-3.31/Modules/CMakeCommonLanguageInclude.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/ejtagle/AppData/Local/VisualGDB/CMake/share/cmake-3.31/Modules/Internal/CMakeCXXLinkerInformation.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/ejtagle/AppData/Local/VisualGDB/CMake/share/cmake-3.31/Modules/Internal/CMakeCommonLinkerInformation.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/ejtagle/AppData/Local/VisualGDB/CMake/share/cmake-3.31/Modules/CMakeASMInformation.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/ejtagle/AppData/Local/VisualGDB/CMake/share/cmake-3.31/Modules/Compiler/GNU-ASM.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/ejtagle/AppData/Local/VisualGDB/CMake/share/cmake-3.31/Modules/Compiler/GNU.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/ejtagle/AppData/Local/VisualGDB/CMake/share/cmake-3.31/Modules/Internal/CMakeASMLinkerInformation.cmake"
+		},
+		{
+			"isExternal" : true,
+			"path" : "C:/Users/ejtagle/AppData/Local/VisualGDB/FindBSP.cmake"
+		},
+		{
+			"isGenerated" : true,
+			"path" : "build/VisualGDB/RelWithDebInfo/BSP.cmake"
+		},
+		{
+			"isExternal" : true,
+			"path" : "C:/Users/ejtagle/AppData/Local/VisualGDB/EmbeddedEFPs/Profiler/framework.cmake"
+		}
+	],
+	"kind" : "cmakeFiles",
+	"paths" : 
+	{
+		"build" : "C:/Projects/DTC-SPM/WheelController/UnitTests/EmbeddedUnitTests/build/VisualGDB/RelWithDebInfo",
+		"source" : "C:/Projects/DTC-SPM/WheelController/UnitTests/EmbeddedUnitTests"
+	},
+	"version" : 
+	{
+		"major" : 1,
+		"minor" : 1
+	}
+}
