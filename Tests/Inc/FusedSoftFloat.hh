@@ -2267,7 +2267,6 @@ static constexpr int8_t ATAN_EXP[257] = {
 	 -30
 };
 
-
 constexpr SF_HOT SoftFloat atan2(SoftFloat y, SoftFloat x) noexcept {
 	if (x.is_zero() && y.is_zero()) return SoftFloat::zero();
 
@@ -2276,29 +2275,336 @@ constexpr SF_HOT SoftFloat atan2(SoftFloat y, SoftFloat x) noexcept {
 	x = x.abs();
 	y = y.abs();
 
+	// Ensure y <= x (octant reduction), record if we swapped
 	bool swap = y > x;
 	if (swap) { SoftFloat t = x; x = y; y = t; }
 
-	// t = y/x in [0, 1]
-	SoftFloat t = x.is_zero() ? SoftFloat::zero() : y / x;
+	// ----------------------------------------------------------------
+	// Compute t = y/x as a Q8.24 fixed-point integer without division.
+	//
+	// Both x and y are normalised: mantissas in [2^29, 2^30),
+	// exponents e_x and e_y arbitrary (but y <= x so result in [0,1]).
+	//
+	// t_real = y_m * 2^e_y / (x_m * 2^e_x)
+	//        = (y_m / x_m) * 2^(e_y - e_x)
+	//
+	// y_m / x_m is in (0, 1] since y <= x after swap.
+	// We want t_Q24 = floor(t_real * 2^24) as a 32-bit integer.
+	//
+	// t_Q24 = floor( y_m * 2^(e_y - e_x) * 2^24 / x_m )
+	//       = floor( y_m * 2^(24 + e_y - e_x) / x_m )
+	//
+	// Let shift = 24 + e_y - e_x.
+	//   y_m in [2^29, 2^30), x_m in [2^29, 2^30).
+	//   After swap, t_real in [0, 1], so shift can be negative (large x)
+	//   or positive.
+	//
+	//   If shift >= 0: numerator = y_m << shift.
+	//     Maximum useful shift: t_Q24 <= 2^24, so y_m << shift <= x_m * 2^24.
+	//     x_m < 2^30, so numerator <= 2^54. Needs uint64_t.
+	//     We cap shift at 30 to avoid absurd shifts (t would be ~2^24 anyway
+	//     since y≈x after swap).
+	//
+	//   If shift < 0: numerator = y_m >> (-shift).
+	//     t_Q24 = floor((y_m >> (-shift)) / x_m).
+	//     If -shift > 29, y_m >> (-shift) == 0 => t_Q24 = 0.
+	//
+	// After obtaining t_Q24 in [0, 2^24]:
+	//   idx      = t_Q24 >> 16          (top 8 bits => table index 0..255)
+	//   frac_Q16 = t_Q24 & 0xFFFF       (bottom 16 bits => interpolation)
+	//
+	// On ARM (runtime): use UDIV for the integer divide.
+	// At consteval:     use portable 64-bit division.
+	// ----------------------------------------------------------------
 
-	// Scale t by 256 to get table index
-	// 256.0 represented as SoftFloat: mant = 0x20000000, exp = -29+8 = -21
-	constexpr SoftFloat scale = SoftFloat::from_raw(0x20000000, -21);
-	SoftFloat idx_f = t * scale;
-	int32_t idx = idx_f.to_int32();
-	if (idx > 255) idx = 255;
-	if (idx < 0)   idx = 0;
+	uint32_t t_Q24;
 
-	// Base value from table
-	SoftFloat base = SoftFloat::from_raw(ATAN_MANT[idx], ATAN_EXP[idx]);
+	if (x.is_zero()) {
+		// y == 0 handled above; x == 0 after swap means y was also 0.
+		// Actually: after swap, x >= y, so x==0 => y==0 => handled already.
+		t_Q24 = 0;
+	}
+	else {
+		uint32_t x_m = static_cast<uint32_t>(x.mantissa); // [2^29, 2^30)
+		uint32_t y_m = static_cast<uint32_t>(y.mantissa); // [0,    2^30)
+		int32_t  exp_diff = y.exponent - x.exponent; // e_y - e_x
+		int32_t  shift = 24 + exp_diff; // we want y_m * 2^shift / x_m
 
-	// Linear interpolation between idx and idx+1
-	SoftFloat next = SoftFloat::from_raw(ATAN_MANT[idx + 1], ATAN_EXP[idx + 1]);
-	SoftFloat frac = idx_f - SoftFloat(idx);   // fractional part in [0,1)
-	SoftFloat angle = base + frac * (next - base);
+		if (UNLIKELY(y_m == 0)) {
+			t_Q24 = 0;
+		}
+		else if (shift <= -30) {
+			// y is at least 2^30 times smaller than x in exponent; t < 2^-6 => t_Q24 = 0
+			t_Q24 = 0;
+		}
+		else if (shift >= 0) {
+			// Numerator = y_m << shift, needs uint64_t
+			// Cap shift: if shift > 30, t_Q24 would exceed 2^24 (impossible since y<=x),
+			// but guard anyway.
+			uint32_t eff_shift = static_cast<uint32_t>(shift > 30 ? 30 : shift);
+			uint64_t num = static_cast<uint64_t>(y_m) << eff_shift;
 
-	// Octant reconstruction
+			// UDIV: 64-bit numerator / 32-bit denominator.
+			// On ARM Cortex-M3 we must do this as two 32-bit UDIVs
+			// (same Knuth D algorithm as in operator/).
+			// At consteval or on non-ARM, fall through to 64-bit divide.
+			if (SF_IS_CONSTEVAL()) {
+				uint64_t q = num / static_cast<uint64_t>(x_m);
+				t_Q24 = q > 0xFFFFFFu ? 0xFFFFFFu
+				      : static_cast<uint32_t>(q);
+			}
+			else {
+#if defined(__arm__)
+				// num < 2^60 (y_m < 2^30, eff_shift <= 30), x_m in [2^29,2^30).
+				// Split 64-bit / 32-bit via Knuth D, two UDIVs.
+				{
+					uint32_t num_hi = static_cast<uint32_t>(num >> 32);
+					uint32_t num_lo = static_cast<uint32_t>(num);
+					uint32_t den    = x_m;
+
+					// If num_hi >= den the true quotient exceeds 2^32; clamp.
+					if (num_hi >= den) {
+						t_Q24 = 0xFFFFFFu; // saturate (y >= x edge)
+					}
+					else {
+						// Knuth D for 64÷32 with num_hi < den:
+						// q_hi = floor(num_hi:num_lo_hi / den) — one UDIV
+						// We split the 32-bit lo word into two 16-bit halves
+						// to stay within 32-bit UDIV on Cortex-M3.
+						//
+						// Standard 2-digit base-2^16 long division:
+						//   Let B = 2^16.
+						//   u = num = num_hi * B^2 + u1 * B + u0
+						//   where u1 = num_lo >> 16, u0 = num_lo & 0xFFFF.
+						//
+						// Digit 1 (high quotient word q1, remainder r1):
+						//   q1*den + r1 = num_hi * B + u1
+						//
+						// Digit 0 (low quotient word q0, remainder r0):
+						//   q0*den + r0 = r1 * B + u0
+						//
+						// Full quotient = q1*B + q0 (64-bit, but we cap at 2^24).
+						uint32_t u1  = num_lo >> 16;
+						uint32_t u0  = num_lo & 0xFFFFu;
+						uint32_t vn1 = den >> 16; // [2^13, 2^14) since den in [2^29,2^30)
+						uint32_t vn0 = den & 0xFFFFu;
+
+						// ── High digit ──────────────────────────────────────
+						// Dividend for digit 1: (num_hi << 16) | u1  [fits uint32_t if num_hi < 2^16]
+						// But num_hi can be up to den-1 < 2^30; num_hi << 16 overflows.
+						// Instead use: q1 = (num_hi * 2^16 + u1) / den.
+						// Rewrite as: q1 = num_hi / (den >> 16) (approx), then correct.
+						// This is exactly Knuth's hat-q: q1_hat = floor((num_hi*B + u1) / den)
+						// using the leading digits.
+						uint32_t q1, rhat;
+						__asm__ volatile(
+						    "udiv %0, %1, %2\n\t"
+						    : "=r"(q1) : "r"(num_hi),
+							"r"(vn1));
+						rhat = num_hi - q1 * vn1;
+
+						// Correction loop (at most 2 iterations)
+						while (q1 >= 0x10000u ||
+						       (uint64_t)q1 * vn0 > ((uint64_t)rhat << 16) + u1) {
+							--q1;
+							rhat += vn1;
+							if (rhat >= 0x10000u) break;
+						}
+
+						uint32_t un21 = (num_hi - q1 * vn1) * 0x10000u + u1
+						                - q1 * vn0;
+
+						// ── Low digit ───────────────────────────────────────
+						uint32_t q0;
+						__asm__ volatile(
+						    "udiv %0, %1, %2\n\t"
+						    : "=r"(q0) : "r"(un21),
+							"r"(vn1));
+						rhat = un21 - q0 * vn1;
+
+						while (q0 >= 0x10000u ||
+						       (uint64_t)q0 * vn0 > ((uint64_t)rhat << 16) + u0) {
+							--q0;
+							rhat += vn1;
+							if (rhat >= 0x10000u) break;
+						}
+
+						uint64_t q_full = ((uint64_t)q1 << 16) | q0;
+						t_Q24 = q_full > 0xFFFFFFu ? 0xFFFFFFu
+						      : static_cast<uint32_t>(q_full);
+					}
+				}
+#else
+				uint64_t q = num / static_cast<uint64_t>(x_m);
+				t_Q24 = q > 0xFFFFFFu ? 0xFFFFFFu
+				      : static_cast<uint32_t>(q);
+#endif
+			}
+		}
+		else {
+			// shift < 0: right-shift y_m to bring exponents into alignment.
+			// t_Q24 = floor(y_m >> (-shift) / x_m)
+			// -shift is in [1, 29].
+			uint32_t y_shifted = y_m >> static_cast<uint32_t>(-shift);
+			// y_shifted < x_m (since t <= 1 and shift < 0 means y < x),
+			// so quotient fits in 32 bits — single UDIV.
+			if (y_shifted == 0) {
+				t_Q24 = 0;
+			}
+			else {
+				if (SF_IS_CONSTEVAL()) {
+					t_Q24 = y_shifted / x_m; // exact, fits uint32_t
+				}
+				else {
+#if defined(__arm__)
+					uint32_t q;
+					__asm__ volatile(
+					    "udiv %0, %1, %2\n\t"
+					    : "=r"(q) : "r"(y_shifted),
+						"r"(x_m));
+					t_Q24 = q;
+#else
+					t_Q24 = y_shifted / x_m;
+#endif
+				}
+			}
+		}
+	}
+
+	// t_Q24 in [0, 2^24] (inclusive: t==1 when y==x after swap)
+	// idx      = top 8 bits  => table index 0..255
+	// frac_Q16 = next 16 bits => linear interpolation weight in [0, 2^16)
+	uint32_t idx      = t_Q24 >> 16; // 0..255
+	uint32_t frac_Q16 = t_Q24 & 0xFFFFu; // 0..65535
+
+	if (idx > 255) idx = 255; // safety clamp
+
+	// ----------------------------------------------------------------
+	// Table lookup + integer linear interpolation
+	//
+	// angle = base + frac_Q16 * (next - base) / 2^16
+	//
+	// We do this in integer arithmetic:
+	//   base_m, next_m are normalised mantissas in [2^29, 2^30) (signed,
+	//   but atan is non-negative for t in [0,1] so both positive here).
+	//   Their exponents differ by at most 8 (table spans [-38,-30]).
+	//
+	// Rather than full SoftFloat add, we align the two mantissas to the
+	// larger exponent, do the interpolation in integer, then renormalise.
+	//
+	// delta = next - base (aligned to base's exponent, clipped to 31 bits)
+	// result_m = base_m + (delta * frac_Q16) >> 16
+	// ----------------------------------------------------------------
+
+	int32_t base_m = ATAN_MANT[idx];
+	int32_t base_e = ATAN_EXP[idx];
+	int32_t next_m = ATAN_MANT[idx + 1];
+	int32_t next_e = ATAN_EXP[idx + 1];
+
+	// Handle the zero entry at idx==0 (atan(0)==0).
+	// ATAN_MANT[0] == 0, so base is zero; result = frac * next.
+	int32_t result_m;
+	int32_t result_e;
+
+	if (UNLIKELY(base_m == 0)) {
+		// Interpolate from 0 to next: result = frac_Q16 * next / 2^16
+		// result_m = (next_m * frac_Q16) >> 16
+		int64_t prod = static_cast<int64_t>(next_m) * static_cast<int64_t>(frac_Q16);
+		result_m = static_cast<int32_t>(prod >> 16);
+		result_e = next_e;
+		// Normalise (result_m may be small if frac_Q16 is small)
+		if (result_m != 0) {
+			uint32_t a = static_cast<uint32_t>(result_m); // always positive here
+			int lz = sf_clz(a);
+			int sh = lz - 2;
+			if (sh > 0) { result_m <<= sh; result_e -= sh; }
+			else if (sh < 0) { result_m >>= -sh; result_e += -sh; }
+		}
+	}
+	else {
+		// Align next to base exponent.
+		// Exponent of (next - base) inherits the larger exponent (base_e or next_e).
+		// Consecutive table entries have very similar values, so delta is small
+		// and their exponents are equal or differ by 1.
+		int32_t delta_m;
+		int32_t delta_e;
+
+		int exp_d = base_e - next_e; // usually 0 or 1
+		if (exp_d == 0) {
+			delta_m = next_m - base_m; // signed, may be negative (shouldn't be for increasing atan)
+			delta_e = base_e;
+		}
+		else if (exp_d > 0) {
+			// base_e > next_e: shift next right
+			int rs = exp_d < 31 ? exp_d : 31;
+			delta_m = (next_m >> rs) - base_m;
+			delta_e = base_e;
+		}
+		else {
+			// next_e > base_e: shift base right
+			int rs = (-exp_d) < 31 ? (-exp_d) : 31;
+			delta_m = next_m - (base_m >> rs);
+			delta_e = next_e;
+		}
+
+		// Interpolation: result = base + frac_Q16 * delta / 2^16
+		// Keep everything at base_e / delta_e.
+		// (frac_Q16 * delta_m) >> 16: delta_m < 2^30, frac_Q16 < 2^16 => product < 2^46, fits int64_t.
+		int64_t interp = static_cast<int64_t>(delta_m) * static_cast<int64_t>(frac_Q16);
+		int32_t corr_m = static_cast<int32_t>(interp >> 16); // delta_e units
+
+		// Add base_m (at base_e) + corr_m (at delta_e).
+		// Align corr to base exponent.
+		int32_t sum_m;
+		int32_t sum_e = base_e;
+
+		if (delta_e == base_e) {
+			sum_m = base_m + corr_m;
+		}
+		else {
+			// delta_e != base_e: align
+			int align = base_e - delta_e;
+			if (align > 0 && align < 31) {
+				sum_m = base_m + (corr_m >> align);
+			}
+			else if (align < 0 && (-align) < 31) {
+				sum_m = (base_m >> (-align)) + corr_m;
+				sum_e = delta_e;
+			}
+			else {
+				sum_m = base_m; // correction negligible
+			}
+		}
+
+		result_m = sum_m;
+		result_e = sum_e;
+
+		// Renormalise (sum may have overflowed by 1 bit or lost a bit)
+		if (result_m != 0) {
+			uint32_t a = sf_abs32(result_m);
+			if (a >= 0x40000000u) { result_m >>= 1; result_e += 1; }
+			else if (a < 0x20000000u) {
+				int lz = sf_clz(a);
+				int sh = lz - 2;
+				if (result_m < 0) {
+					result_m = -static_cast<int32_t>(
+					    static_cast<uint32_t>(-result_m) << sh);
+				}
+				else {
+					result_m <<= sh;
+				}
+				result_e -= sh;
+			}
+		}
+	}
+
+	SoftFloat angle = (result_m == 0)
+	                ? SoftFloat::zero()
+	                : SoftFloat::from_raw(result_m, sf_sat_exp(result_e));
+
+	// ----------------------------------------------------------------
+	// Octant reconstruction (unchanged from original)
+	// ----------------------------------------------------------------
 	if (swap)  angle = SoftFloat::half_pi() - angle;
 	if (x_neg) angle = SoftFloat::pi() - angle;
 	if (y_neg) angle = -angle;
