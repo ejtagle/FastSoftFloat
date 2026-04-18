@@ -1834,27 +1834,6 @@ static constexpr int32_t INV_SQRT_MANT[257] = {
 	0x2D413CCD,
 };
 
-static constexpr int8_t INV_SQRT_EXP[257] = {
-	-29, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30,
-	-30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30,
-	-30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30,
-	-30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30,
-	-30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30,
-	-30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30,
-	-30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30,
-	-30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30,
-	-30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30,
-	-30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30,
-	-30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30,
-	-30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30,
-	-30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30,
-	-30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30,
-	-30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30,
-	-30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30,
-	-30,
-};
-
-#if 1
 constexpr SF_HOT SoftFloat SoftFloat::inv_sqrt() const noexcept {
 	if (UNLIKELY(mantissa <= 0)) return { };
 
@@ -2083,52 +2062,6 @@ constexpr SF_HOT SoftFloat SoftFloat::inv_sqrt() const noexcept {
 
 	return y;
 }
-#else
-constexpr SF_HOT SoftFloat SoftFloat::inv_sqrt() const noexcept {
-	if (UNLIKELY(mantissa <= 0)) return {};
-
-	uint32_t m_abs = sf_abs32(mantissa);
-	int32_t E = exponent + 29;                       // x = f * 2^E, f in [1, 2)
-
-	// Table index and fractional part
-	uint32_t offset = m_abs - 0x20000000u;           // (f - 1) * 2^29
-	uint32_t idx = offset >> 21;                     // 0 … 255
-	uint32_t frac_bits = (offset >> 13) & 0xFF;      // 8‑bit fraction
-
-	// Linear interpolation for 1/√f
-	SoftFloat v0 = SoftFloat::from_raw(INV_SQRT_MANT[idx], idx ? -30 : -29 /*INV_SQRT_EXP[idx]*/);
-	SoftFloat v1 = SoftFloat::from_raw(INV_SQRT_MANT[idx + 1], -30 /*INV_SQRT_EXP[idx + 1]*/);
-	SoftFloat frac = SoftFloat(static_cast<int32_t>(frac_bits)) >> 8;
-	SoftFloat y = fused_mul_add(v0,frac,(v1 - v0));    // y ≈ 1/√f
-
-	// Exponent scaling: multiply by 2^(-E/2)
-	int32_t shift = E >> 1;                          // floor(E/2)
-	y >>= shift;                                  // divide by 2^shift
-	if (E & 1) {
-		// Multiply by 1/√2 ≈ 0.70710678
-		constexpr SoftFloat inv_sqrt2 = SoftFloat::from_raw(0x2D413CCD, -30);
-		y *= inv_sqrt2;
-	}
-
-	// Two Newton‑Raphson iterations: y = y * (1.5 - 0.5 * x * y²)
-	constexpr SoftFloat k15 = SoftFloat::from_raw(0x30000000, -29); // 1.5
-	const SoftFloat half_x = SoftFloat::from_raw(mantissa, exponent - 1); // 0.5 * x
-
-	// Iteration 1
-	{
-		const SoftFloat y2(y * y);
-		SoftFloat step = fused_mul_sub(k15, half_x, y2);   // 1.5 - 0.5*x*y²
-		y *= step;
-	}
-	// Iteration 2
-	{
-		const SoftFloat y2(y * y);
-		SoftFloat step = fused_mul_sub(k15, half_x, y2);
-		y *= step;
-	}
-	return y;
-}
-#endif
 
 #else
 // =========================================================================

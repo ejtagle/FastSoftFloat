@@ -2934,7 +2934,7 @@ LOAD C:/sysgcc/arm-eabi/bin/../lib/gcc/arm-none-eabi/15.2.1/../../../../arm-none
 LOAD C:/sysgcc/arm-eabi/bin/../lib/gcc/arm-none-eabi/15.2.1/../../../../arm-none-eabi/lib/thumb/v7e-m+fp/hard\libm.a
 LOAD C:/sysgcc/arm-eabi/bin/../lib/gcc/arm-none-eabi/15.2.1/thumb/v7e-m+fp/hard\libgcc.a
 
-.debug_info     0x00000000    0x3cb59
+.debug_info     0x00000000    0x3ca48
  .debug_info    0x00000000      0xaa0 CMakeFiles/BSP.dir/Core/Src/main.c.obj
  .debug_info    0x00000aa0      0x266 CMakeFiles/BSP.dir/Core/Src/stm32f4xx_hal_msp.c.obj
  .debug_info    0x00000d06      0x115 CMakeFiles/BSP.dir/Core/Src/stm32f4xx_it.c.obj
@@ -2947,9 +2947,9 @@ LOAD C:/sysgcc/arm-eabi/bin/../lib/gcc/arm-none-eabi/15.2.1/thumb/v7e-m+fp/hard\
  .debug_info    0x00003648      0xada CMakeFiles/BSP.dir/Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_rcc.c.obj
  .debug_info    0x00004122      0x7dd CMakeFiles/BSP_EFP_Profiler.dir/C_/Users/ejtagle/AppData/Local/VisualGDB/EmbeddedEFPs/Profiler/FastSemihosting.cpp.obj
  .debug_info    0x000048ff     0x1390 CMakeFiles/BSP_EFP_Profiler.dir/C_/Users/ejtagle/AppData/Local/VisualGDB/EmbeddedEFPs/Profiler/TestResourceManager.cpp.obj
- .debug_info    0x00005c8f    0x36eca CMakeFiles/EmbeddedUnitTests.dir/Tests/Src/tests.cpp.obj
+ .debug_info    0x00005c8f    0x36db9 CMakeFiles/EmbeddedUnitTests.dir/Tests/Src/tests.cpp.obj
 
-.debug_abbrev   0x00000000     0x29a6
+.debug_abbrev   0x00000000     0x2992
  .debug_abbrev  0x00000000      0x32b CMakeFiles/BSP.dir/Core/Src/main.c.obj
  .debug_abbrev  0x0000032b       0xda CMakeFiles/BSP.dir/Core/Src/stm32f4xx_hal_msp.c.obj
  .debug_abbrev  0x00000405       0xba CMakeFiles/BSP.dir/Core/Src/stm32f4xx_it.c.obj
@@ -2962,7 +2962,7 @@ LOAD C:/sysgcc/arm-eabi/bin/../lib/gcc/arm-none-eabi/15.2.1/thumb/v7e-m+fp/hard\
  .debug_abbrev  0x00000ef6      0x358 CMakeFiles/BSP.dir/Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_rcc.c.obj
  .debug_abbrev  0x0000124e      0x36c CMakeFiles/BSP_EFP_Profiler.dir/C_/Users/ejtagle/AppData/Local/VisualGDB/EmbeddedEFPs/Profiler/FastSemihosting.cpp.obj
  .debug_abbrev  0x000015ba      0x36b CMakeFiles/BSP_EFP_Profiler.dir/C_/Users/ejtagle/AppData/Local/VisualGDB/EmbeddedEFPs/Profiler/TestResourceManager.cpp.obj
- .debug_abbrev  0x00001925     0x1081 CMakeFiles/EmbeddedUnitTests.dir/Tests/Src/tests.cpp.obj
+ .debug_abbrev  0x00001925     0x106d CMakeFiles/EmbeddedUnitTests.dir/Tests/Src/tests.cpp.obj
 
 .debug_aranges  0x00000000      0x7e0
  .debug_aranges
@@ -3036,33 +3036,33 @@ LOAD C:/sysgcc/arm-eabi/bin/../lib/gcc/arm-none-eabi/15.2.1/thumb/v7e-m+fp/hard\
  .debug_line    0x0000374f      0xc55 CMakeFiles/BSP_EFP_Profiler.dir/C_/Users/ejtagle/AppData/Local/VisualGDB/EmbeddedEFPs/Profiler/TestResourceManager.cpp.obj
  .debug_line    0x000043a4    0x1c759 CMakeFiles/EmbeddedUnitTests.dir/Tests/Src/tests.cpp.obj
 
-.debug_str      0x00000000     0x735c
- .debug_str     0x00000000     0x735c CMakeFiles/BSP.dir/Core/Src/main.c.obj
+.debug_str      0x00000000     0x734f
+ .debug_str     0x00000000     0x734f CMakeFiles/BSP.dir/Core/Src/main.c.obj
                                 0x6e1 (size before relaxing)
- .debug_str     0x0000735c        0x0 CMakeFiles/BSP.dir/Core/Src/stm32f4xx_hal_msp.c.obj
+ .debug_str     0x0000734f        0x0 CMakeFiles/BSP.dir/Core/Src/stm32f4xx_hal_msp.c.obj
                                 0x30c (size before relaxing)
- .debug_str     0x0000735c        0x0 CMakeFiles/BSP.dir/Core/Src/stm32f4xx_it.c.obj
+ .debug_str     0x0000734f        0x0 CMakeFiles/BSP.dir/Core/Src/stm32f4xx_it.c.obj
                                 0x280 (size before relaxing)
- .debug_str     0x0000735c        0x0 CMakeFiles/BSP.dir/Core/Src/sysmem.c.obj
+ .debug_str     0x0000734f        0x0 CMakeFiles/BSP.dir/Core/Src/sysmem.c.obj
                                 0x276 (size before relaxing)
- .debug_str     0x0000735c        0x0 CMakeFiles/BSP.dir/Core/Src/system_stm32f4xx.c.obj
+ .debug_str     0x0000734f        0x0 CMakeFiles/BSP.dir/Core/Src/system_stm32f4xx.c.obj
                                 0x3c6 (size before relaxing)
- .debug_str     0x0000735c        0x0 CMakeFiles/BSP.dir/Core/Startup/startup_stm32f407vgtx.S.obj
+ .debug_str     0x0000734f        0x0 CMakeFiles/BSP.dir/Core/Startup/startup_stm32f407vgtx.S.obj
                                  0xe0 (size before relaxing)
- .debug_str     0x0000735c        0x0 CMakeFiles/BSP.dir/Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal.c.obj
+ .debug_str     0x0000734f        0x0 CMakeFiles/BSP.dir/Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal.c.obj
                                 0xbb5 (size before relaxing)
- .debug_str     0x0000735c        0x0 CMakeFiles/BSP.dir/Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_cortex.c.obj
+ .debug_str     0x0000734f        0x0 CMakeFiles/BSP.dir/Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_cortex.c.obj
                                 0xcc6 (size before relaxing)
- .debug_str     0x0000735c        0x0 CMakeFiles/BSP.dir/Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_gpio.c.obj
+ .debug_str     0x0000734f        0x0 CMakeFiles/BSP.dir/Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_gpio.c.obj
                                 0x531 (size before relaxing)
- .debug_str     0x0000735c        0x0 CMakeFiles/BSP.dir/Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_rcc.c.obj
+ .debug_str     0x0000734f        0x0 CMakeFiles/BSP.dir/Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_rcc.c.obj
                                 0x757 (size before relaxing)
- .debug_str     0x0000735c        0x0 CMakeFiles/BSP_EFP_Profiler.dir/C_/Users/ejtagle/AppData/Local/VisualGDB/EmbeddedEFPs/Profiler/FastSemihosting.cpp.obj
+ .debug_str     0x0000734f        0x0 CMakeFiles/BSP_EFP_Profiler.dir/C_/Users/ejtagle/AppData/Local/VisualGDB/EmbeddedEFPs/Profiler/FastSemihosting.cpp.obj
                                 0x68b (size before relaxing)
- .debug_str     0x0000735c        0x0 CMakeFiles/BSP_EFP_Profiler.dir/C_/Users/ejtagle/AppData/Local/VisualGDB/EmbeddedEFPs/Profiler/TestResourceManager.cpp.obj
+ .debug_str     0x0000734f        0x0 CMakeFiles/BSP_EFP_Profiler.dir/C_/Users/ejtagle/AppData/Local/VisualGDB/EmbeddedEFPs/Profiler/TestResourceManager.cpp.obj
                                 0xa5c (size before relaxing)
- .debug_str     0x0000735c        0x0 CMakeFiles/EmbeddedUnitTests.dir/Tests/Src/tests.cpp.obj
-                               0x5426 (size before relaxing)
+ .debug_str     0x0000734f        0x0 CMakeFiles/EmbeddedUnitTests.dir/Tests/Src/tests.cpp.obj
+                               0x5419 (size before relaxing)
 
 .comment        0x00000000       0x45
  .comment       0x00000000       0x45 CMakeFiles/BSP.dir/Core/Src/main.c.obj
@@ -3196,7 +3196,7 @@ LOAD C:/sysgcc/arm-eabi/bin/../lib/gcc/arm-none-eabi/15.2.1/thumb/v7e-m+fp/hard\
  .debug_frame   0x000036dc      0x394 C:/sysgcc/arm-eabi/bin/../lib/gcc/arm-none-eabi/15.2.1/../../../../arm-none-eabi/lib/thumb/v7e-m+fp/hard\librdimon_nano.a(arm_librdimon_a-syscalls.o)
 
 .debug_loclists
-                0x00000000    0x2f1f2
+                0x00000000    0x2f217
  .debug_loclists
                 0x00000000       0x5a CMakeFiles/BSP.dir/Core/Src/sysmem.c.obj
  .debug_loclists
@@ -3214,7 +3214,7 @@ LOAD C:/sysgcc/arm-eabi/bin/../lib/gcc/arm-none-eabi/15.2.1/thumb/v7e-m+fp/hard\
  .debug_loclists
                 0x00001491      0xd8d CMakeFiles/BSP_EFP_Profiler.dir/C_/Users/ejtagle/AppData/Local/VisualGDB/EmbeddedEFPs/Profiler/TestResourceManager.cpp.obj
  .debug_loclists
-                0x0000221e    0x2cfd4 CMakeFiles/EmbeddedUnitTests.dir/Tests/Src/tests.cpp.obj
+                0x0000221e    0x2cff9 CMakeFiles/EmbeddedUnitTests.dir/Tests/Src/tests.cpp.obj
 
 .debug_line_str
                 0x00000000      0x29a
