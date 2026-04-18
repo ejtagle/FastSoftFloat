@@ -1753,22 +1753,15 @@ constexpr SF_HOT SoftFloatPair sf_sincos(SoftFloat x) noexcept {
 	SoftFloat xi = x;
 	{
 		// Multiply by 1/(2π) and truncate to integer.
-		// fused mul avoids materialising an intermediate SoftFloat.
-		int32_t ki = (xi * SoftFloat::from_raw(INV_2PI_M, INV_2PI_E)).to_int32();
+		int32_t ki = (x * SoftFloat::from_raw(INV_2PI_M, INV_2PI_E)).to_int32();
 		if (ki != 0) {
-			// Subtract ki * 2π  (one fused_mul_sub call)
-			xi = fused_mul_sub(xi,
-				SoftFloat::from_raw(ki > 0 ? ki : -ki, 0),
-				SoftFloat::from_raw(TWO_PI_M, TWO_PI_E));
-			// fused_mul_sub(a, b, c) = a - b*c, so we need xi - ki*two_pi.
-			// But fused_mul_sub(xi, ki, two_pi) = xi - ki*two_pi only if ki > 0.
-			// For negative ki use addition.  Redo with simpler SoftFloat arithmetic:
+			// Subtract ki * 2π to reduce x into (-2π, 2π).
 			xi = x - SoftFloat(ki) * SoftFloat::from_raw(TWO_PI_M, TWO_PI_E);
 		}
 		// Clamp to [0, 2π) — at most two corrections needed.
 		SoftFloat two_pi = SoftFloat::from_raw(TWO_PI_M, TWO_PI_E);
-		if (xi.mantissa < 0)          xi = xi + two_pi;
-		if (!(xi < two_pi))           xi = xi - two_pi;
+		if (xi.mantissa < 0)   xi = xi + two_pi;
+		if (!(xi < two_pi))    xi = xi - two_pi;
 	}
 
 	// ── Map reduced angle to table index + fixed-point fraction ──────────
@@ -1868,21 +1861,29 @@ constexpr SF_HOT SoftFloatPair sf_sincos(SoftFloat x) noexcept {
 	//   = frac_Q29 * H_MANT * 2^{H_EXP - 29}
 	//
 	// cos0·δ = c_m * frac_Q29 * H_MANT * 2^{c_e + H_EXP - 29}
-	//        = [(c_m * frac_Q29) >> 29 * H_MANT] >> 29 * 2^{c_e + H_EXP}
 	//
-	// Let:
-	//   adj    = (c_m * frac_Q29) >> 29          // ∈ (-2^30, 2^30), ~30-bit
-	//   corr_m = (adj  * H_MANT ) >> 29          // ∈ (-2^30, 2^30), ~30-bit
-	//   corr_e = c_e + H_EXP                     // exponent of correction
+	// Two-step integer computation:
 	//
-	// Similarly for the cosine correction (using s_m, s_e with negation).
+	//   Step 1:  adj    = (c_m * frac_Q29) >> 29
+	//              represents c_m * (frac_Q29 / 2^29) as a 30-bit integer.
+	//   Step 2:  corr_m = (adj  * H_MANT ) >> 29
+	//              represents adj * (H_MANT / 2^29).
 	//
-	// Both corrections are added to the respective table values via
-	// fixed-point alignment (pure integer arithmetic, no SoftFloat ops).
+	// The two right-shifts together absorb 58 bits of implicit scale.
+	// For the VALUE equation to hold:
+	//
+	//   corr_m * 2^{corr_e} = c_m * 2^{c_e}  *  frac_Q29 * 2^{-29}  *  H_MANT * 2^{H_EXP}
+	//
+	// Since corr_m ≈ (c_m * frac_Q29 * H_MANT) / 2^58, we need:
+	//
+	//   corr_m * 2^{corr_e} = corr_m * 2^{58}  *  2^{c_e - 29 + H_EXP}
+	//   ⟹  corr_e = c_e + H_EXP - 29 + 58 = c_e + H_EXP + 29
+	//
+	// The +29 term is CRITICAL — it accounts for the 58 bits consumed by the
+	// two >> 29 shifts, offset by the 29 bits already encoded in H_EXP's
+	// Q-format meaning.  Omitting it makes the correction ~2^{-29} ≈ 10^{-9}
+	// times too small, effectively disabling interpolation entirely.
 
-	// Helper lambda: compute correction mantissa and exponent.
-	// Returns {corr_m, corr_e} for "base_m * frac_Q29 * h".
-	// base_m is signed; corr_m will be signed.
 	auto make_corr = [&](int32_t base_m,
 		int32_t base_e,
 		bool negate) -> SoftFloat
@@ -1898,15 +1899,19 @@ constexpr SF_HOT SoftFloatPair sf_sincos(SoftFloat x) noexcept {
 		// Step 2: corr = adj * H_MANT / 2^29
 		int64_t p2     = static_cast<int64_t>(adj) * static_cast<int64_t>(H_MANT);
 		int32_t corr_m = static_cast<int32_t>(p2 >> 29); // ∈ (-2^30, 2^30)
-		int32_t corr_e = base_e + H_EXP; // = base_e - 36
+
+		// ── BUGFIX: corr_e = base_e + H_EXP + 29 ─────────────────────────
+		// The two >> 29 shifts consume 58 bits of implicit scale.
+		// H_EXP already accounts for 29 of those bits (via the Q0.29 format
+		// of frac_Q29), so the remaining 29 must be added explicitly here.
+		// The original code wrote `base_e + H_EXP`, which is 29 too small,
+		// making every correction ≈ 2^{-29} ≈ 10^{-9} of its correct value.
+		int32_t corr_e = base_e + H_EXP + 29;
 
 		if (UNLIKELY(corr_m == 0)) return SoftFloat::zero();
 		if (negate) corr_m = -corr_m;
 
 		// Normalise corr_m to [2^29, 2^30) with correct sign.
-		// corr_m can be up to ~2^30 (if adj ≈ 2^30 and H_MANT ≈ 2^30 then p2 >> 29 ≈ 2^31,
-		// but adj < 2^30 and H_MANT < 2^30 so p2 < 2^60, p2>>29 < 2^31).
-		// One bit of right-shift might be needed.
 		uint32_t abs_c = sf_abs32(corr_m);
 		if (abs_c >= 0x40000000u) {
 			// bit30 set → overflow by 1

@@ -30,3 +30,9 @@
 10497	10644	7981815327645193	EmbeddedUnitTests.bin	32beef47ff8d74fb
 10519	10686	0	CMakeFiles/EmbeddedUnitTests.hex	b6614cd807c415cb
 10519	10686	0	C:/Projects/DTC-SPM/WheelController/UnitTests/EmbeddedUnitTests/build/VisualGDB/RelWithDebInfo/CMakeFiles/EmbeddedUnitTests.hex	b6614cd807c415cb
+10	10462	7982341791314914	CMakeFiles/EmbeddedUnitTests.dir/Tests/Src/tests.cpp.obj	a7bf9dbabe45f516
+10464	11222	7982341798880373	EmbeddedUnitTests	19207d10231c684
+11223	11404	7982341800859251	EmbeddedUnitTests.bin	32beef47ff8d74fb
+11223	11404	7982341800859251	C:/Projects/DTC-SPM/WheelController/UnitTests/EmbeddedUnitTests/build/VisualGDB/RelWithDebInfo/EmbeddedUnitTests.bin	32beef47ff8d74fb
+11244	11423	0	CMakeFiles/EmbeddedUnitTests.hex	b6614cd807c415cb
+11244	11423	0	C:/Projects/DTC-SPM/WheelController/UnitTests/EmbeddedUnitTests/build/VisualGDB/RelWithDebInfo/CMakeFiles/EmbeddedUnitTests.hex	b6614cd807c415cb
