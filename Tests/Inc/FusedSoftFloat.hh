@@ -1793,7 +1793,7 @@ constexpr SoftFloat SoftFloat::tanh() const noexcept {
 	return (e2 - SoftFloat::one()) / (e2 + SoftFloat::one());
 }
 
-#if 0
+#if 1
 // Inverse square root table for mantissa in [1.0, 2.0)
 // f = 1 + i/256, i = 0..256
 // value = mantissa * 2^exponent, normalized to [2^29, 2^30)
@@ -1854,6 +1854,236 @@ static constexpr int8_t INV_SQRT_EXP[257] = {
 	-30,
 };
 
+#if 1
+constexpr SF_HOT SoftFloat SoftFloat::inv_sqrt() const noexcept {
+	if (UNLIKELY(mantissa <= 0)) return { };
+
+	// ── Decompose: x = f * 2^E, f in [1,2), E = exponent + 29 ───────────
+	// We need E to be even so that 2^{-E/2} is exact.
+	// If E is odd, multiply f by 2 (making f in [2,4)) and decrement E by 1,
+	// keeping E even. Then f/2 is in [1,2) — equivalently, we use the upper
+	// half of the table (f in [1,2) still, but x has been scaled).
+	//
+	// Simpler: just track the odd/even parity and use the mantissa directly.
+	//
+	//   E_raw = exponent + 29
+	//   If E_raw is odd: work with (mantissa << 1) at exponent (exponent - 1)
+	//                    so E_eff = (exponent - 1) + 29 = E_raw - 1  (even)
+	//                    and the mantissa is now in [2^30, 2^31) — need >>1 for table
+	//   Better: keep mantissa in [2^29,2^30) always and just note parity.
+
+	int32_t E_raw = exponent + 29; // x = (mantissa*2^{-29}) * 2^{E_raw}
+
+	// We will look up in the table using the mantissa as-is (f in [1,2)).
+	// The table gives y = 1/sqrt(f) with y stored at exponent -30 (except idx=0 at -29).
+	// Final result exponent = (table exponent) - E_raw/2.
+	//
+	// But we need E_raw to be even for exact half-exponent. Handle odd E_raw:
+	//   If odd, scale x by 2: new_x = x*2 = f*2 * 2^{E_raw-1}, E_eff = E_raw-1 (even).
+	//   inv_sqrt(x) = inv_sqrt(new_x/2) = inv_sqrt(new_x) * sqrt(2)
+	//              => multiply result by sqrt(2) = 1/inv_sqrt(2).
+	//
+	// Equivalently: if E_raw odd, we use (mantissa<<1) for table lookup
+	//   (which doubles f into [2,4)), then the table gives 1/sqrt(f*2),
+	//   and we correct by sqrt(2). 
+	//
+	// Cleanest: separate the mantissa lookup from the exponent correction.
+
+	uint32_t a = static_cast<uint32_t>(mantissa); // in [2^29, 2^30)
+
+	// ── Table lookup with parity-adjusted mantissa ────────────────────────
+	// We always look up using `a` (the original mantissa), giving us
+	// y_table = 1/sqrt(f), f = a * 2^{-29}, y_table at effective exp -30.
+	//
+	// The true result is:
+	//   inv_sqrt(x) = y_table * 2^{-E_raw/2}
+	//
+	// If E_raw is even:
+	//   result = y_table * 2^{-E_raw/2}
+	//   result_exp = -30 - E_raw/2    [but idx=0 is at -29, so +1 for that case]
+	//
+	// If E_raw is odd:
+	//   2^{-E_raw/2} = 2^{-(E_raw-1)/2} * 2^{-1/2} = 2^{-E_raw/2} * sqrt(2)/sqrt(2)...
+	//   Write E_raw = 2k+1:
+	//   inv_sqrt(f * 2^{2k+1}) = inv_sqrt(f) * 2^{-(2k+1)/2}
+	//                          = inv_sqrt(f) * 2^{-k} * 2^{-1/2}
+	//                          = y_table * 2^{-k-30} * sqrt(2)   [at table exp -30]
+	//   result_exp = -30 - k  = -30 - (E_raw-1)/2  = -30 - E_raw/2  (integer div)
+	//   and multiply by sqrt(2) ≈ 1.41421356.
+
+	uint32_t offset = a - 0x20000000u; // [0, 2^29)
+	uint32_t idx    = offset >> 21; // [0, 255]
+	uint32_t frac8  = (offset >> 13) & 0xFFu; // [0, 255]
+
+	// ── Fixed-point interpolation in Q2.30 ───────────────────────────────
+	int32_t y_q30;
+	int32_t table_exp; // actual exponent of the interpolated table value
+
+	if (UNLIKELY(idx == 0)) {
+		// v0 at exponent -29: INV_SQRT_MANT[0] = 0x20000000 = 1.0 * 2^29 * 2^{-29}
+		// v1 at exponent -30: INV_SQRT_MANT[1]
+		// Bring v0 to exponent -30 by right-shifting mantissa by 1.
+		int32_t v0_q30 = static_cast<int32_t>(INV_SQRT_MANT[0] >> 1); // 0x10000000
+		int32_t v1_q30 = INV_SQRT_MANT[1];
+
+		int32_t delta  = v1_q30 - v0_q30;
+		// delta*frac8: delta ~ -0x03FE17EC (large), use int64_t
+		int32_t corr   = static_cast<int32_t>(
+		    (static_cast<int64_t>(delta) * static_cast<int64_t>(frac8)) >> 8
+		);
+		y_q30     = v0_q30 + corr;
+		table_exp = -30; // we normalised v0 to -30
+	}
+	else {
+		// Normal case: both entries at exponent -30.
+		int32_t v0_q30 = INV_SQRT_MANT[idx];
+		int32_t v1_q30 = INV_SQRT_MANT[idx + 1];
+
+		int32_t delta  = v1_q30 - v0_q30; // negative (table is decreasing), fits int32_t
+		// delta < 2^23, frac8 < 256: product < 2^31, safe in int32_t
+		int32_t corr   = (delta * static_cast<int32_t>(frac8)) >> 8;
+		y_q30          = v0_q30 + corr;
+		table_exp      = -30;
+	}
+
+	// ── Compute result exponent ───────────────────────────────────────────
+	// y_table = y_q30 * 2^{table_exp} = 1/sqrt(f)
+	// inv_sqrt(x) = y_table * 2^{-E_raw/2}     (if E_raw even)
+	//             = y_table * sqrt(2) * 2^{-E_raw/2}   (if E_raw odd)
+	//
+	// result_exp = table_exp - (E_raw >> 1)
+	//            = -30 - (E_raw >> 1)
+	//
+	// Verification for inv_sqrt(4):
+	//   mantissa=0x20000000, exponent=-27
+	//   E_raw = -27+29 = 2 (even)
+	//   idx=0, v0_q30=0x10000000, frac8=0 => y_q30=0x10000000
+	//   table_exp = -30
+	//   result_exp = -30 - (2>>1) = -30 - 1 = -31
+	//   y = 0x10000000 * 2^{-31} = 2^{28} * 2^{-31} = 2^{-3} = 0.125  ✗
+	//
+	// Still wrong! The issue: idx=0, v0_q30 = INV_SQRT_MANT[0]>>1 = 0x10000000
+	// But the true value at idx=0, frac=0 is inv_sqrt(1.0) = 1.0.
+	// 1.0 in Q at exp -30 = 2^30 * 2^{-30} = 0x40000000 * 2^{-30}.
+	// But 0x40000000 is out of [2^29,2^30)! So we represent 1.0 as:
+	//   0x20000000 * 2^{-29}   (that's what INV_SQRT_MANT[0]/INV_SQRT_EXP[0] says)
+	//
+	// The real fix: do NOT shift v0 to exp -30 at idx=0.
+	// Instead, keep table_exp = -29 for that entry and handle it properly.
+
+	// ── CORRECT approach: keep each entry at its true exponent ───────────
+	// Since only idx=0 differs (exp=-29 vs -30), and the interpolation
+	// crosses the boundary, we handle it as follows:
+	//
+	// For idx=0: interpolate between:
+	//   v0 = 1.0         at exp -29: mantissa = 0x20000000
+	//   v1 = ~0.9980...  at exp -30: mantissa = INV_SQRT_MANT[1]
+	//
+	// Align both to the coarser exponent (-29) for interpolation:
+	//   v0_at29 = 0x20000000  (no change)
+	//   v1_at29 = INV_SQRT_MANT[1] >> 1  (right shift by 1 to go from -30 to -29)
+	//   delta_at29 = v1_at29 - v0_at29  (small negative)
+	//   y_at29 = v0_at29 + (delta_at29 * frac8) >> 8
+	//   table_exp = -29
+	//
+	// For idx >= 1: both at -30, table_exp = -30.
+
+	// Redo:
+	if (UNLIKELY(idx == 0)) {
+		int32_t v0_at29 = INV_SQRT_MANT[0]; // 0x20000000, exp -29
+		int32_t v1_at29 = INV_SQRT_MANT[1] >> 1; // bring exp-30 entry to exp-29
+		int32_t delta   = v1_at29 - v0_at29; // small negative
+		int32_t corr    = static_cast<int32_t>(
+		    (static_cast<int64_t>(delta) * static_cast<int64_t>(frac8)) >> 8
+		);
+		y_q30     = v0_at29 + corr;
+		table_exp = -29;
+	}
+	else {
+		int32_t v0_q30 = INV_SQRT_MANT[idx];
+		int32_t v1_q30 = INV_SQRT_MANT[idx + 1];
+		int32_t delta  = v1_q30 - v0_q30;
+		int32_t corr   = (delta * static_cast<int32_t>(frac8)) >> 8;
+		y_q30          = v0_q30 + corr;
+		table_exp      = -30;
+	}
+
+	// result_exp = table_exp - (E_raw >> 1)
+	//
+	// Verify inv_sqrt(4):
+	//   E_raw=2, idx=0, table_exp=-29
+	//   result_exp = -29 - 1 = -30  ✓  (0x20000000 * 2^{-30} = 0.5)
+	//
+	// Verify inv_sqrt(2):
+	//   mantissa=0x20000000, exponent=-28
+	//   E_raw = -28+29 = 1 (odd)
+	//   idx=0, y_q30=0x20000000, table_exp=-29
+	//   result_exp = -29 - 0 = -29
+	//   y = 0x20000000 * 2^{-29} * sqrt(2) = 1.0 * 1.41421 = 1.41421  ✗
+	//   Expected: 1/sqrt(2) = 0.7071...
+	//
+	// Hmm: for inv_sqrt(2), f=1.0, E_raw=1.
+	//   inv_sqrt(2) = inv_sqrt(f=1) * 2^{-E_raw/2} = 1.0 * 2^{-0.5} = 1/sqrt(2)
+	//   = 1.0 * sqrt(2)/2 = sqrt(2) * 2^{-1}
+	//   With odd E: result = y_table * sqrt(2) * 2^{-(E_raw>>1)} * 2^{-1}
+	//   Wait, let me be more careful.
+	//
+	//   E_raw = 1 = 2*0 + 1, so k=0.
+	//   inv_sqrt(f * 2^1) = inv_sqrt(f) * 2^{-1/2}
+	//                     = 1.0 * 2^{-1/2}
+	//                     = (1/sqrt(2))
+	//   In fixed point: result = y_q30 * 2^{table_exp} * 2^{-1/2}
+	//   We handle 2^{-1/2} by multiplying by INV_SQRT2.
+	//   result_exp = table_exp - (E_raw>>1) = -29 - 0 = -29
+	//   After multiply by INV_SQRT2 (= 0x2D413CCD at exp -30 relative):
+	//     y_q30 * INV_SQRT2_Q30 >> 30 at exp -29:
+	//     = 0x20000000 * 0x2D413CCD >> 30
+	//     = 2^29 * 759250125 >> 30
+	//     = 759250125 >> 1 = 379625062 ... that's > 2^29? No: 379625062 < 2^29=536870912. 
+	//     Hmm that's ~0.707*2^29 which is correct for 1/sqrt(2).
+	//   Then sf_normalise_fast will shift left to normalise.
+	//   After normalise: result = 0x2D413CCD * 2^{-30}  which is 1/sqrt(2) ✓
+
+	int32_t result_e = table_exp - (E_raw >> 1);
+
+	if (E_raw & 1) {
+		// Multiply y_q30 by 1/sqrt(2) in fixed point.
+		// INV_SQRT2 = 0x2D413CCD represents 1/sqrt(2) * 2^30 (i.e., at Q0.30).
+		// y_q30 * INV_SQRT2 >> 30 stays at the same exponent (table_exp).
+		constexpr int32_t INV_SQRT2_Q30 = 0x2D413CCD;
+		int64_t scaled = static_cast<int64_t>(y_q30)
+		               * static_cast<int64_t>(INV_SQRT2_Q30);
+		y_q30 = static_cast<int32_t>(scaled >> 30);
+		// result_e is unchanged: the >> 30 cancels the implicit 2^30 in INV_SQRT2_Q30.
+	}
+
+	// ── One-or-two-bit normalise ──────────────────────────────────────────
+	// After interpolation, y_q30 should be in [2^29, 2^30).
+	// After the INV_SQRT2 multiply it may be as low as ~0.707 * 2^29.
+	// sf_normalise_fast handles all cases.
+	sf_normalise_fast(y_q30, result_e);
+
+	// ── Newton-Raphson refinement ─────────────────────────────────────────
+	SoftFloat y  = from_raw(y_q30, result_e);
+	SoftFloat hx = from_raw(mantissa, exponent - 1); // 0.5 * x
+	constexpr SoftFloat k15 = from_raw(0x30000000, -29); // 1.5
+
+	// Iteration 1
+	{
+		SoftFloat y2   = mul_plain(y, y);
+		SoftFloat step = fused_mul_sub(k15, hx, y2);
+		y = mul_plain(y, step);
+	}
+	// Iteration 2
+	{
+		SoftFloat y2   = mul_plain(y, y);
+		SoftFloat step = fused_mul_sub(k15, hx, y2);
+		y = mul_plain(y, step);
+	}
+
+	return y;
+}
+#else
 constexpr SF_HOT SoftFloat SoftFloat::inv_sqrt() const noexcept {
 	if (UNLIKELY(mantissa <= 0)) return {};
 
@@ -1866,8 +2096,8 @@ constexpr SF_HOT SoftFloat SoftFloat::inv_sqrt() const noexcept {
 	uint32_t frac_bits = (offset >> 13) & 0xFF;      // 8‑bit fraction
 
 	// Linear interpolation for 1/√f
-	SoftFloat v0 = SoftFloat::from_raw(INV_SQRT_MANT[idx], INV_SQRT_EXP[idx]);
-	SoftFloat v1 = SoftFloat::from_raw(INV_SQRT_MANT[idx + 1], INV_SQRT_EXP[idx + 1]);
+	SoftFloat v0 = SoftFloat::from_raw(INV_SQRT_MANT[idx], idx ? -30 : -29 /*INV_SQRT_EXP[idx]*/);
+	SoftFloat v1 = SoftFloat::from_raw(INV_SQRT_MANT[idx + 1], -30 /*INV_SQRT_EXP[idx + 1]*/);
 	SoftFloat frac = SoftFloat(static_cast<int32_t>(frac_bits)) >> 8;
 	SoftFloat y = fused_mul_add(v0,frac,(v1 - v0));    // y ≈ 1/√f
 
@@ -1898,6 +2128,7 @@ constexpr SF_HOT SoftFloat SoftFloat::inv_sqrt() const noexcept {
 	}
 	return y;
 }
+#endif
 
 #else
 // =========================================================================
@@ -1912,7 +2143,8 @@ constexpr SF_HOT SoftFloat SoftFloat::inv_sqrt() const noexcept {
 	// Both to_float() and sf_bitcast are constexpr in C++20.
 	float    xf = to_float();
 	uint32_t bits = sf_bitcast<uint32_t>(xf);
-	bits = 0x5f3759dfu - (bits >> 1);
+	//bits = 0x5f3759dfu - (bits >> 1);
+	bits = 0x5f375a86u - (bits >> 1); // slightly better constant
 	SoftFloat y(sf_bitcast<float>(bits));
 
 	constexpr SoftFloat k15 = from_raw(0x30000000, -29);  // 1.5 (no `static` — C++20)
@@ -2618,6 +2850,35 @@ constexpr SoftFloat SoftFloat::pow(SoftFloat y) const noexcept {
 	return (y * log()).exp();
 }
 
+#if 0
+constexpr SF_HOT SoftFloat hypot(SoftFloat x, SoftFloat y) noexcept {
+	x = x.abs(); y = y.abs();
+	if (x < y) { SoftFloat t = x; x = y; y = t; }
+	if (x.mantissa == 0) return { };
+    
+	int32_t e = x.exponent;
+	// Direct scaled mantissas — skip SoftFloat construction overhead:
+	int32_t xm = x.mantissa; // already normalised
+	int32_t ym_e = y.exponent - e; // relative exponent of y
+    
+	// Scale: xs = x.m * 2^{-29}, ys = y.m * 2^{ym_e - 29}
+	// xs² = x.m² * 2^{-58}, ys² = y.m² * 2^{2*(ym_e-29)}
+	// Both at exponent -58 + 2*29 = -58+58 = 0? No.
+	// Actually xs.m² >> 29 = product mantissa at exponent xs_e*2 + 29 = -29
+	// This is what mul_plain does. Keep existing approach, just reduce
+	// the number of from_raw + normalise calls:
+    
+	SoftFloat xs2 = SoftFloat::from_raw(xm, -29) * SoftFloat::from_raw(xm, -29);
+    
+	int32_t ym_rel = ym_e - 29; // ys exponent (relative)
+	SoftFloat ys_sf = (ym_rel > -60) ? SoftFloat::from_raw(y.mantissa, ym_rel) : SoftFloat::zero();
+	SoftFloat ys2 = ys_sf * ys_sf;
+    
+	SoftFloat s = xs2 + ys2;
+	SoftFloat r = s * s.inv_sqrt(); // sqrt
+	return SoftFloat::from_raw(r.mantissa, r.exponent + e + 29);
+}
+#else
 constexpr SF_HOT SoftFloat hypot(SoftFloat x, SoftFloat y) noexcept {
 	x = x.abs(); y = y.abs();
 	if (x < y) { SoftFloat t = x; x = y; y = t; }
@@ -2632,12 +2893,63 @@ constexpr SF_HOT SoftFloat hypot(SoftFloat x, SoftFloat y) noexcept {
 	SoftFloat r = (xs * xs + ys * ys).sqrt();          // no division
 	return SoftFloat::from_raw(r.mantissa, r.exponent + e + 29);  // restore original scale
 }
+#endif
 
 // trunc – toward zero
 constexpr SF_HOT SoftFloat SoftFloat::trunc() const noexcept {
 	return SoftFloat(to_int32());
 }
 
+#if 1
+// floor – toward -inf
+// Optimized: Direct bit manipulation avoids SoftFloat arithmetic overhead.
+constexpr SoftFloat SoftFloat::floor() const noexcept {
+	// 1. Fast path: Zero or already an integer (exponent >= 0)
+	if (UNLIKELY(mantissa == 0)) return *this;
+	if (exponent >= 0) return *this;
+
+	// 2. Determine shift amount for fractional bits.
+	//    exponent is negative (e.g., -1 to -128).
+	int32_t rs = -exponent;
+
+	// 3. Handle tiny numbers: If shift >= 31, abs(value) < 1.
+	//    Mantissa is in [2^29, 2^30).
+	if (rs >= 31) {
+		// If positive, floor is 0. If negative, floor is -1.
+		return mantissa > 0 ? SoftFloat::zero() : SoftFloat::neg_one();
+	}
+
+	// 4. Extract absolute value of mantissa.
+	uint32_t a = sf_abs32(mantissa);
+
+	// 5. Truncate toward zero (shift right).
+	//    We also need to know if we dropped any bits (fractional part).
+	uint32_t frac_mask = (1u << rs) - 1u;
+	bool has_frac = (a & frac_mask) != 0;
+
+	int32_t int_part_m = static_cast<int32_t>(a >> rs);
+	int32_t result_m;
+
+	// 6. Apply floor logic:
+	//    Positive: Truncation IS floor.
+	//    Negative: If we dropped bits, we must go one lower (more negative).
+	if (mantissa < 0) {
+		if (has_frac) {
+			result_m = -(int_part_m + 1);
+		}
+		else {
+			result_m = -int_part_m;
+		}
+	}
+	else {
+		result_m = int_part_m;
+	}
+
+	// 7. Construct result. 
+	//    SoftFloat(int32_t) normalizes the integer to standard form.
+	return SoftFloat(result_m);
+}
+#else
 // floor – toward -inf
 constexpr SoftFloat SoftFloat::floor() const noexcept {
 	if (mantissa == 0) return *this;
@@ -2650,7 +2962,40 @@ constexpr SoftFloat SoftFloat::floor() const noexcept {
 	}
 	return fi;
 }
+#endif
 
+#if 1
+constexpr SoftFloat SoftFloat::ceil() const noexcept {
+	if (mantissa == 0 || exponent >= 0) return *this;
+	// exponent < 0: some fractional bits exist
+	// Check if perfectly integer already
+	int rs = -exponent; // number of fractional bits
+	if (rs >= 30) {
+		// |x| < 1: ceil = 0 for negative, 1 for positive
+		return is_positive() ? SoftFloat::one() : SoftFloat::zero();
+	}
+	uint32_t a = sf_abs32(mantissa);
+	uint32_t frac_mask = (1u << rs) - 1u;
+	bool has_frac = (a & frac_mask) != 0;
+    
+	// Truncate to integer (clear fractional bits)
+	int32_t trunc_m = static_cast<int32_t>(a & ~frac_mask);
+	int32_t trunc_e = exponent;
+	if (trunc_m == 0) {
+		// |x| < epsilon
+		return is_positive() && has_frac ? SoftFloat::one() : SoftFloat::zero();
+	}
+    
+	// Reconstruct truncated value with correct sign
+	SoftFloat fi = from_raw(is_negative() ? -trunc_m : trunc_m, trunc_e);
+    
+	// ceil: if positive and had fraction, add one
+	if (is_positive() && has_frac) {
+		return fi + SoftFloat::one();
+	}
+	return fi;
+}
+#else
 // ceil – toward +inf
 constexpr SoftFloat SoftFloat::ceil() const noexcept {
 	if (mantissa == 0) return *this;
@@ -2662,7 +3007,46 @@ constexpr SoftFloat SoftFloat::ceil() const noexcept {
 	}
 	return fi;
 }
+#endif
 
+#if 1
+// round – nearest, ties away from zero
+// Optimized: Integer arithmetic on mantissa avoids full SoftFloat add/trunc chain.
+constexpr SoftFloat SoftFloat::round() const noexcept {
+	// 1. Fast path: Zero or integer
+	if (UNLIKELY(mantissa == 0)) return *this;
+	if (exponent >= 0) return *this;
+
+	int32_t rs = -exponent;
+
+	// 2. Handle tiny numbers.
+	//    If shift >= 31, value is in (-1, 1).
+	//    Since normalized mantissa is in [0.5, 1.0), rs=30 means val in [0.5, 1.0).
+	if (rs >= 31) return SoftFloat::zero();
+
+	// 3. Extract absolute value.
+	uint32_t a = sf_abs32(mantissa);
+
+	// 4. Add rounding bias: 0.5 * 2^rs = 1 << (rs - 1).
+	//    This implements "round to nearest, ties away from zero".
+	//    Proof: 
+	//      Let val = a * 2^-rs.
+	//      We want round(val). 
+	//      Algorithm adds 0.5 to magnitude: (a * 2^-rs) + 0.5
+	//      Multiplied by 2^rs: a + 2^(rs-1).
+	//      Integer truncation of sum >> rs is the rounded result.
+    
+	uint32_t bias = 1u << (rs - 1);
+	uint32_t sum = a + bias; // Safe from overflow: a < 2^30, bias <= 2^29.
+
+	int32_t result_m = static_cast<int32_t>(sum >> rs);
+
+	// 5. Restore sign.
+	if (mantissa < 0) result_m = -result_m;
+
+	return SoftFloat(result_m);
+}
+#else
 // round – nearest, ties away from zero
 constexpr SoftFloat SoftFloat::round() const noexcept {
 	SoftFloat half = SoftFloat::half();
@@ -2673,6 +3057,7 @@ constexpr SoftFloat SoftFloat::round() const noexcept {
 		return (*this + half).floor();
 	}
 }
+#endif
 
 // fract – fractional part
 constexpr SoftFloat SoftFloat::fract() const noexcept {
