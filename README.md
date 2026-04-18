@@ -10,15 +10,15 @@ To use it, just include it, and, instead of using the 'float' type for variables
 It has equivalent resolution as of IEEE float type (29 bits mantissa, 7 bits exponent)
 No NaN, +/-Inf are handled and/or created
 
-##Basic Arithmetic
+## Basic Arithmetic
 
-###ADDITION / SUBTRACTION
+### ADDITION / SUBTRACTION
 | Operation | SF min | SF typ | SF max |
 |-----------|--------|--------|--------|
 | operator+ | 8      | 45     | 70     |
 | operator- | 10     | 48     | 75     |
 
-###MULTIPLICATION
+### MULTIPLICATION
 | Operation                            | SF min | SF typ | SF max |
 |--------------------------------------|--------|--------|--------|
 | operator\*                           | 18     | 38     | 58     |
@@ -26,12 +26,12 @@ No NaN, +/-Inf are handled and/or created
 | fused_mul_sub(a,b,c) — a−b·c         | 18     | 58     | 95     |
 | fused_mul_mul_add(a,b,c,d) — a·b+c·d | 20     | 72     | 115    |
 
-###DIVISION
+### DIVISION
 | Operation | SF min | SF typ | SF max |
 |-----------|--------|--------|--------|
 | operator/ | 38     | 75     | 120    |
 
-###Conversions & Scalar Utilities
+### Conversions & Scalar Utilities
 | Operation              | SF min | SF typ | SF max |
 |------------------------|--------|--------|--------|
 | operator- (negate)     | 14     | 15     | 16     |
@@ -45,15 +45,15 @@ No NaN, +/-Inf are handled and/or created
 | to_float()             | 8      | 16     | 24     |
 | to_int32()             | 8      | 18     | 30     |
 
-##Transcendental & Math Functions
+## Transcendental & Math Functions
 
-###SQUARE ROOT / INVERSE SQUARE ROOT
+### SQUARE ROOT / INVERSE SQUARE ROOT
 | Operation                   | SF min | SF typ | SF max |
 |-----------------------------|--------|--------|--------|
 | inv_sqrt() — Q-rsqrt+2×NR   | 70     | 130    | 200    |
 | sqrt() — \*this · inv_sqrt()| 100    | 180    | 280    |
 
-###TRIGONOMETRY (sin/cos: 512-entry table + 1-point FMA interp)
+### TRIGONOMETRY (sin/cos: 512-entry table + 1-point FMA interp)
 | Operation                             | SF min | SF typ | SF max |
 |---------------------------------------|--------|--------|--------|
 | sin()                                 | 100    | 170    | 250    |
@@ -64,7 +64,7 @@ No NaN, +/-Inf are handled and/or created
 | acos() — asin chain                   | 265    | 395    | 555    |
 | atan2() — div + 256-entry table + FMA | 90     | 138    | 202    |
 
-###EXPONENTIAL / LOGARITHM (256-entry table + linear interp)
+### EXPONENTIAL / LOGARITHM (256-entry table + linear interp)
 | Operation                  | SF min | SF typ | SF max |
 |----------------------------|--------|--------|--------|
 | exp()                      | 85     | 128    | 180    |
@@ -73,20 +73,20 @@ No NaN, +/-Inf are handled and/or created
 | log10() — log2 × log10(2)  | 70     | 108    | 155    |
 | pow(x,y) — log + mul + exp | 225    | 345    | 500    |
 
-###HYPERBOLIC
+### HYPERBOLIC
 | Operation                      | SF min | SF typ | SF max |
 |--------------------------------|--------|--------|--------|
 | sinh() — exp + div             | 200    | 310    | 430    |
 | cosh() — exp + div             | 200    | 310    | 430    |
 | tanh() — exp(2x) + (e−1)/(e+1) | 175    | 280    | 390    |
 
-###GEOMETRY HELPERS
+### GEOMETRY HELPERS
 | Operation                            | SF min | SF typ | SF max |
 |--------------------------------------|--------|--------|--------|
 | hypot(x,y) — scale + fmma + inv_sqrt | 55     | 155    | 275    |
 | lerp(a,b,t) — fused_mul_add path     | 12     | 55     | 95     |
 
-###Rounding & Remainder\
+### Rounding & Remainder\
 | Operation      | SF min | SF typ | SF max |
 |----------------|--------|--------|--------|
 | trunc()        | 14     | 28     | 48     |
