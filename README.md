@@ -10,6 +10,8 @@ To use it, just include it, and, instead of using the 'float' type for variables
 It has equivalent resolution as of IEEE float type (29 bits mantissa, 7 bits exponent)
 No NaN, +/-Inf are handled and/or created
 
+# Expected approximate cycle counts
+
 ## Basic Arithmetic
 
 ### ADDITION / SUBTRACTION
@@ -86,7 +88,7 @@ No NaN, +/-Inf are handled and/or created
 | hypot(x,y) — scale + fmma + inv_sqrt | 55     | 155    | 275    |
 | lerp(a,b,t) — fused_mul_add path     | 12     | 55     | 95     |
 
-### Rounding & Remainder\
+### Rounding & Remainder
 | Operation      | SF min | SF typ | SF max |
 |----------------|--------|--------|--------|
 | trunc()        | 14     | 28     | 48     |
