@@ -986,13 +986,11 @@ namespace SoftFloatTest {
 		ok &= chk(r1.exponent == 127, "  exp overflow clamp +");
 
 		// Test saturation directly
-		int32_t m = 0x20000000, e = 200;
-		sf_normalise(m, e);
-		ok &= chk(e == 127, "  sf_normalise exp overflow clamp");
+		SoftFloat t1(0x20000000, 200);
+		ok &= chk(t1.exponent == 127, "  sf_normalise exp overflow clamp");
 
-		m = 0x20000000, e = -200;
-		sf_normalise(m, e);
-		ok &= chk(e == -128, "  sf_normalise exp underflow clamp");
+		SoftFloat t2(0x20000000, -200);
+		ok &= chk(t2.exponent == -128, "  sf_normalise exp underflow clamp");
 
 		return ok;
 	}

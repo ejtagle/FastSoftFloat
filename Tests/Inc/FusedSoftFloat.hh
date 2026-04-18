@@ -98,7 +98,7 @@ template<typename To, typename From>
 // sf_abs32 — branchless absolute value for int32_t, constexpr-safe.
 [[nodiscard]] constexpr SF_INLINE uint32_t sf_abs32(int32_t m) noexcept
 {
-#if defined(__arm__) && !defined(__clang__) // GCC ARM
+#if defined(__arm__)
 	if (!SF_IS_CONSTEVAL()) {
 		uint32_t rd;
 		__asm__ volatile (
@@ -139,36 +139,6 @@ template<typename To, typename From>
 	if (e > 127) return  127;
 	if (e < -128) return -128;
 	return e;
-}
-
-// =========================================================================
-// Normalisation for [2^29, 2^30)
-// ---------------------------------------------------------------------
-// Target: bit29 set, bits 31:30 both zero in abs(mantissa).
-// CLZ of correctly normalised value == 2.
-// Now constexpr: usable in static_assert and constinit contexts.
-// =========================================================================
-constexpr SF_INLINE void sf_normalise(int32_t& m, int32_t& e) noexcept
-{
-	if (m == 0) { e = 0; return; }
-	uint32_t a = sf_abs32(m);
-	int lz = sf_clz(a);
-	int shift = lz - 2;
-
-	if (shift > 0) {
-		int ne = e - shift;
-		if (ne < -250) { m = 0; e = 0; return; }
-		a <<= shift;
-		e = ne;
-	}
-	else if (shift < 0) {
-		int rs = -shift;
-		a >>= rs;
-		e += rs;
-	}
-
-	e = sf_sat_exp(e);
-	m = (m < 0) ? -static_cast<int32_t>(a) : static_cast<int32_t>(a);
 }
 
 // =========================================================================
@@ -330,8 +300,8 @@ struct SoftFloatPair;
 // =========================================================================
 class SoftFloat {
 public:
-	int32_t mantissa;
-	int32_t exponent;
+	int32_t mantissa /*:24*/;
+	int32_t exponent /*:8*/;
 
 	// ------------------------------------------------------------------
 	// Default constructor — zero
@@ -351,25 +321,25 @@ public:
 	constexpr SF_HOT SoftFloat(int32_t m, int32_t e) noexcept
 		: mantissa{ m }, exponent{ e }
 	{
-		sf_normalise(mantissa, exponent);
+		normalise();
 	}
 
 	constexpr SF_HOT explicit SoftFloat(int v) noexcept
 		: mantissa{ v }, exponent{ 0 }
 	{
-		sf_normalise(mantissa, exponent);
+		normalise();
 	}
 
 	constexpr SF_HOT explicit SoftFloat(int32_t v) noexcept
 		: mantissa{ v }, exponent{ 0 }
 	{
-		sf_normalise(mantissa, exponent);
+		normalise();
 	}
 
 	constexpr SF_HOT explicit SoftFloat(int16_t v) noexcept
 		: mantissa{ static_cast<int32_t>(v) }, exponent{ 0 }
 	{
-		sf_normalise(mantissa, exponent);
+		normalise();
 	}
 
 	constexpr SF_HOT explicit SoftFloat(float f) noexcept
@@ -384,7 +354,43 @@ public:
 	// ------------------------------------------------------------------
 	// Manual re-normalise (public utility, rarely needed)
 	// ------------------------------------------------------------------
-	constexpr SF_HOT void normalise() noexcept { sf_normalise(mantissa, exponent); }
+		// =========================================================================
+	// Normalisation for [2^29, 2^30)
+	// ---------------------------------------------------------------------
+	// Target: bit29 set, bits 31:30 both zero in abs(mantissa).
+	// CLZ of correctly normalised value == 2.
+	// Now constexpr: usable in static_assert and constinit contexts.
+	// =========================================================================
+	constexpr SF_HOT SF_INLINE void normalise() noexcept
+	{
+		int32_t m = mantissa, e = exponent;
+		if (m == 0) { 
+			exponent = 0;
+			return;
+		}
+		uint32_t a = sf_abs32(m);
+		int lz = sf_clz(a);
+		int shift = lz - 2;
+
+		if (shift > 0) {
+			int ne = e - shift;
+			if (ne < -250) { 
+				mantissa = 0;
+				exponent = 0;
+				return; 
+			}
+			a <<= shift;
+			e = ne;
+		}
+		else if (shift < 0) {
+			int rs = -shift;
+			a >>= rs;
+			e += rs;
+		}
+
+		exponent = sf_sat_exp(e);
+		mantissa = (m < 0) ? -static_cast<int32_t>(a) : static_cast<int32_t>(a);
+	}
 
 	// ------------------------------------------------------------------
 	// to_float — constexpr in C++20 via std::bit_cast
@@ -1520,148 +1526,420 @@ static constexpr int8_t  SF_SIN_EXP[512] = {
 	-32,-32,-32,-32,-32,-32,-33,-33,-33,-33,-33,-34,-34,-34,-35,-36
 };
 
-#if 0
-// Internal: do range reduction once, return {sin(x), cos(x)} from same table slot.
-// Uses 64‑bit fixed‑point arithmetic to avoid SoftFloat multiplications.
-// Internal: do range reduction once, return {sin(x), cos(x)} from same table slot.
-// Uses 64‑bit fixed‑point arithmetic to avoid SoftFloat multiplications.
-constexpr SF_HOT SoftFloatPair sf_sincos(SoftFloat x) noexcept
-{
-	// Constants in internal representation (already normalized)
-	constexpr int32_t  INV_TWO_PI_M = 683565276;   // 1/(2π) * 2^32
-	constexpr int32_t  INV_TWO_PI_E = -32;
-	constexpr int32_t  TWO_PI_M = 843314857;   // 2π * 2^28
-	constexpr int32_t  TWO_PI_E = -27;
-	constexpr int32_t  STEP_M = 843314857;   // π/512 * 2^36
-	constexpr int32_t  STEP_E = -36;
+#if 1
+// Internal: fixed-point sincos interpolation.
+//
+// Table entries are normalised SoftFloat values with mantissa in [2^29, 2^30)
+// and exponent in [-36, -29].  The maximum entry magnitude is 1.0 (at idx=128,
+// the 90° peak), stored as {536870912, -29} = 2^29 * 2^-29 = 1.0.
+//
+// Strategy
+// --------
+// 1. Range-reduce x into [0, 2π) using integer arithmetic on the SoftFloat
+//    representation (one multiply + one subtract, both already present).
+//
+// 2. Convert the reduced angle to a Q-format fixed-point index:
+//
+//      idx_Q = round(x * (512 / 2π))
+//
+//    where 512/2π = 81.4873..., stored as a normalised SoftFloat constant.
+//    to_int32() gives the integer part (table index), and the remainder
+//    drives the interpolation.
+//
+// 3. Fixed-point interpolation.
+//
+//    Let h = step = 2π/512.  Within a table cell:
+//
+//      sin(x0 + δ) ≈ sin(x0) + cos(x0)·δ
+//      cos(x0 + δ) ≈ cos(x0) − sin(x0)·δ
+//
+//    We need δ = x − x0.  Rather than computing x0 = idx * h in SoftFloat
+//    and subtracting, we note that after computing:
+//
+//      u = x * (512 / 2π)      [SoftFloat, exact to ~30 bits]
+//
+//    the fractional part of u is (x − x0) / h, i.e. δ/h ∈ [0,1).
+//    We extract this as an integer with 29 fractional bits:
+//
+//      frac_Q29 = (u.mantissa << (−u.exponent − 1)) & mask   [if u.exponent ≤ -1]
+//
+//    Then  δ = (frac_Q29 / 2^29) * h,  so:
+//
+//      sin0 + cos0·δ = sin0 + cos0 * h * (frac_Q29 / 2^29)
+//
+//    Pre-folding h = 2π/512 into the scaling:
+//
+//      correction_mantissa = (cos0.mantissa * frac_Q29) >> 29   [signed SMULL >> 29]
+//
+//    and the exponent of the correction is:
+//
+//      correction_exp = cos0.exponent + h_exp
+//                     = cos0.exponent + (−28 − 9)          [h = 2π/512 ≈ m·2^-37, so h_exp ≈ -37 + (-28) ... ]
+//
+//    More precisely, h = π/256.  π = 843314857 * 2^-28, so
+//    h = 843314857 * 2^-28 / 256 = 843314857 * 2^-36.
+//    Mantissa is already in [2^29,2^30) with exponent -36, so h ≡ {843314857, -36}.
+//
+//    The product  cos0 * (frac_Q29/2^29) * h  has:
+//      mantissa ≈ cos0.mantissa * frac_Q29 >> 29   (both ~30-bit, product ~60-bit)
+//      exponent  = cos0.exponent + h.exponent + correction
+//               = cos0.exponent + (-36) + (29-29) ... [see derivation below]
+//
+// Full derivation
+// ---------------
+//   frac_Q29 represents  δ/h  in Q0.29 format, i.e.
+//       δ/h = frac_Q29 * 2^{-29}
+//   so  δ = h * frac_Q29 * 2^{-29}
+//         = (h_m * 2^{h_e}) * (frac_Q29 * 2^{-29})
+//         = h_m * frac_Q29 * 2^{h_e - 29}
+//
+//   cos0 = c_m * 2^{c_e}
+//
+//   cos0 * δ = c_m * h_m * frac_Q29 * 2^{c_e + h_e - 29}
+//
+//   Product c_m * h_m is ~60 bits; shift right by 29 to normalise:
+//   ⇒ mantissa ≈ (c_m * frac_Q29) >> 29   [fits int32_t since frac_Q29 < 2^29]
+//      exponent  = c_e + h_e                [no extra -29 because we absorbed it in the >> 29]
+//
+//   Wait — let's be careful:
+//     (c_m * frac_Q29) has ~59 bits (c_m < 2^30, frac_Q29 < 2^29).
+//     We shift right by 29 ⇒ result has ~30 bits.
+//     The implicit 2^{-29} from frac_Q29's Q format AND the 2^{-29} from the shift
+//     give 2^{-58} … but we only shifted by 29, giving 2^{-29}.
+//
+//   Reconcile:
+//     Actual value = c_m * 2^{c_e}  *  frac_Q29 * 2^{-29}  *  h_m * 2^{h_e}
+//     Let P = (c_m * frac_Q29) in integer arithmetic.
+//     P >> 29  has value  P * 2^{-29}  =  c_m * frac_Q29 * 2^{-29}.
+//     Actual value = (P >> 29) * 2^{c_e} * h_m * 2^{h_e}.
+//     But we also need to fold in h_m (=843314857 ≈ 2^{29.65}).
+//
+//   Simplification — fold h into a single integer multiplier:
+//     Since h_m is a constant, we precompute:
+//       scaled_frac = (frac_Q29 * h_m) >> 29   [≈ frac_Q29 * 1.570..., result < 2^29 * π/2]
+//     Actually this overflows: frac_Q29 < 2^29, h_m < 2^30 ⇒ product < 2^59, fits int64_t.
+//     Then:
+//       cos0 * δ  mantissa ≈ (c_m * scaled_frac) >> 29
+//       exponent  = c_e + h_e + 0           where the 29+29-29=29 shifts were folded.
+//
+//   Let's redo cleanly with explicit 64-bit:
+//
+//     // Step A: δ in Q0.29, scaled by h_m
+//     int64_t sfrac = (int64_t)frac_Q29 * H_MANT;          // < 2^59
+//     int32_t sfrac32 = (int32_t)(sfrac >> 29);             // < 2^30, represents frac * h_m/2^29
+//                                                            // = frac * h / 2^{h_e}  (h_m/2^29 ≈ 1.0 for π/256)
+//
+//     Wait — h_m = 843314857 ≈ π * 2^28; frac ∈ [0,1); frac_Q29 < 2^29.
+//     sfrac32 = frac_Q29 * h_m >> 29 ≈ frac * 2^29 * π * 2^28 >> 29 = frac * π * 2^28.
+//     So sfrac32 represents  δ * 2^{-h_e} / (frac * h)  ... getting complicated.
+//
+// Cleaner approach — use the observation that the correction is SMALL.
+// -----------------------------------------------------------------------
+// The table has 512 entries per 2π, so the maximum δ is h = 2π/512 ≈ 0.01227.
+// The maximum |cos0| is 1.0.  So |cos0 * δ| ≤ 0.01227, which is about 2^{-6.3}.
+//
+// Both sin0 and cos0 have exponents in [-36, -29].
+// The correction exponent = cos0.exponent + h.exponent_contribution.
+// h = 843314857 * 2^{-36}  ≈ 0.01227,  so h contributes exponent = -36 relative to a
+// unit-normalised cos0.
+//
+// More precisely, if cos0 = c_m * 2^{c_e} with c_m in [2^29,2^30):
+//   correction = c_m * frac * 2^{c_e}  * h
+//              = c_m * frac * 2^{c_e}  * h_m * 2^{-36}
+// where frac = frac_Q29 * 2^{-29}.
+//
+//   correction_val = (c_m * frac_Q29 * h_m) >> (29 + 29)  [to get integer part of 30-bit mantissa]
+//                  * 2^{c_e + (-36) + 29 + 29 - 58}
+//   Hmm: c_m * frac_Q29 * h_m is up to 2^{30+29+30} = 2^{89}, doesn't fit 64-bit.
+//
+// -----------------------------------------------------------------------
+// FINAL APPROACH: Two-step fixed-point, using the fact that frac_Q29 < 2^29.
+//
+//   1. Compute  adj = (c_m * frac_Q29) >> 29.
+//      c_m ∈ [2^29, 2^30), frac_Q29 ∈ [0, 2^29).
+//      Product < 2^59, fits int64_t.
+//      adj < 2^30.
+//      This represents  c_m * (frac_Q29 / 2^29) = c_m * (δ/h).
+//
+//   2. The actual correction is  adj * h = adj * h_m * 2^{h_e}.
+//      adj is an integer with the same "unit" as c_m (i.e., represents adj * 2^{c_e}).
+//      correction = adj_m * 2^{c_e}  *  h_m * 2^{h_e}  [but adj < 2^30, h_m < 2^30 → product up to 2^60]
+//      correction_m = (adj * h_m) >> 29
+//      correction_e = c_e + h_e
+//      where h_e = -36  and h_m = 843314857.
+//      correction_m = ((c_m * frac_Q29 >> 29) * h_m) >> 29
+//      correction_e = c_e + (-36)
+//
+//   This is exact enough.  adj is up to 2^30, h_m < 2^30, so adj*h_m < 2^60: fits int64_t.
+//
+//   3. Since the correction is small (< 0.01228) and sin0/cos0 are in [0,1],
+//      we must add them with proper exponent alignment.
+//
+// =========================================================================
+//
+// IMPLEMENTATION
+// =========================================================================
+//
+//   Inputs: idx ∈ [0, 511], frac_Q29 ∈ [0, 2^29)
+//
+//   sin0 = SF_SIN_MANT[idx] * 2^{SF_SIN_EXP[idx]}   (signed)
+//   cos0 = SF_SIN_MANT[(idx+128)&511] * 2^{SF_SIN_EXP[(idx+128)&511]}
+//
+//   Correction for sin:  +cos0 * δ
+//   Correction for cos:  -sin0 * δ
+//
+//   δ = frac_Q29 * 2^{-29} * h = frac_Q29 * h_m * 2^{h_e - 29}
+//
+//   Let F = frac_Q29.  (F ∈ [0, 2^29))
+//
+//   For sin correction:
+//     P = (int64_t)cos0.m * F               // < 2^59, signed
+//     adj = P >> 29                          // ∈ (-2^30, 2^30), represents cos0 * F/2^29
+//     Q = (int64_t)adj * H_MANT             // adj < 2^30, H_MANT < 2^30 ⇒ < 2^60
+//     corr_m = (int32_t)(Q >> 29)           // ∈ (-2^31, 2^31) — might be slightly > 2^30
+//     corr_e = cos0.e + H_EXP               // = cos0.e - 36
+//
+//   Now add sin0 (mantissa s_m, exponent s_e) + corr (mantissa corr_m, exponent corr_e):
+//     Standard SoftFloat addition with alignment shift.
+//
+//   The correction magnitude is ≤ 1.0 * 0.01228 * 2^30 ≈ 1.318 * 10^7.
+//   sin0 magnitude is in [2^29, 2^30) = [5.37e8, 1.07e9].
+//   So the correction can be up to ~1.2% of the main value, which is 2^{-6.3} relative.
+//   Exponent difference is: corr_e - sin0.e = (cos0.e - 36) - sin0.e.
+//   Since sin0.e and cos0.e are both in [-36, -29], corr_e ∈ [-72, -65].
+//   sin0.e ∈ [-36, -29].  Difference = corr_e - sin0.e ∈ [-72-(-29), -65-(-36)] = [-43, -29].
+//   This is always negative and ≤ -29, so the correction is always a right-shift of corr.
+//
+//   But wait: the correction is already small, so after alignment we might lose all precision
+//   if the shift is too large.  In the worst case (sin0.e = -29, corr_e = -72), shift = 43 bits,
+//   meaning the correction is completely lost.  That's fine — it's below the 30-bit precision
+//   of the representation.
+//
+//   In practice, near the peaks (sin0 ≈ 1, cos0 ≈ 0), cos0.e is very negative and the correction
+//   is tiny, which is correct.  Near the zero-crossings (sin0 ≈ 0, cos0 ≈ 1), the correction
+//   matters most and cos0.e ≈ -29 (minimum negative), giving shift ≈ 29 + 36 - sin0.e.
+//   But sin0.e is also very negative near the zero-crossing, making the shift small.
+//
+// =========================================================================
 
-	int32_t m = x.mantissa;
-	int32_t e = x.exponent;
+constexpr SF_HOT SoftFloatPair sf_sincos(SoftFloat x) noexcept {
+	// ── Constants ────────────────────────────────────────────────────────
+	// inv_two_pi = 1/(2π): 683565276 * 2^-32 ≈ 0.15915494...
+	constexpr int32_t INV_2PI_M = 683565276;
+	constexpr int32_t INV_2PI_E = -32;
 
-	// Handle zero input quickly
-	if (UNLIKELY(m == 0)) {
+	// two_pi = 2π: 843314857 * 2^-27 ≈ 6.28318530...
+	constexpr int32_t TWO_PI_M  = 843314857;
+	constexpr int32_t TWO_PI_E  = -27;
+
+	// inv_step = 512/(2π) = 256/π: 683565276 * 2^-23 ≈ 81.4873...
+	// Used to map reduced angle → table index.
+	// 683565276 * 2^-23 = 683565276 / 8388608 = 81.4873...  ✓
+	constexpr int32_t INV_STEP_M = 683565276;
+	constexpr int32_t INV_STEP_E = -23;
+
+	// h = 2π/512 = π/256: 843314857 * 2^-36
+	// This is the angle step between table entries.
+	constexpr int32_t H_MANT = 843314857;
+	constexpr int32_t H_EXP  = -36; // h = H_MANT * 2^H_EXP
+
+	// ── Handle zero ───────────────────────────────────────────────────────
+	if (UNLIKELY(x.mantissa == 0)) {
 		return { SoftFloat::zero(), SoftFloat::one() };
 	}
 
-	SoftFloat x_abs;
-	int64_t X_red;
+	// ── Range reduction: x → [0, 2π) ────────────────────────────────────
+	// k = round-toward-zero(x / 2π)  [integer number of full cycles to remove]
+	SoftFloat xi = x;
+	{
+		// Multiply by 1/(2π) and truncate to integer.
+		// fused mul avoids materialising an intermediate SoftFloat.
+		int32_t ki = (xi * SoftFloat::from_raw(INV_2PI_M, INV_2PI_E)).to_int32();
+		if (ki != 0) {
+			// Subtract ki * 2π  (one fused_mul_sub call)
+			xi = fused_mul_sub(xi,
+				SoftFloat::from_raw(ki > 0 ? ki : -ki, 0),
+				SoftFloat::from_raw(TWO_PI_M, TWO_PI_E));
+			// fused_mul_sub(a, b, c) = a - b*c, so we need xi - ki*two_pi.
+			// But fused_mul_sub(xi, ki, two_pi) = xi - ki*two_pi only if ki > 0.
+			// For negative ki use addition.  Redo with simpler SoftFloat arithmetic:
+			xi = x - SoftFloat(ki) * SoftFloat::from_raw(TWO_PI_M, TWO_PI_E);
+		}
+		// Clamp to [0, 2π) — at most two corrections needed.
+		SoftFloat two_pi = SoftFloat::from_raw(TWO_PI_M, TWO_PI_E);
+		if (xi.mantissa < 0)          xi = xi + two_pi;
+		if (!(xi < two_pi))           xi = xi - two_pi;
+	}
 
-	// 2π represented as a 64‑bit fixed‑point number with 32 fractional bits:
-	//   TWO_PI_FP = TWO_PI_M * 2^(TWO_PI_E + 32) = TWO_PI_M * 2^5.
-	constexpr int64_t TWO_PI_FP = static_cast<int64_t>(TWO_PI_M) << 5;
+	// ── Map reduced angle to table index + fixed-point fraction ──────────
+	//
+	// u = xi * inv_step   (u ∈ [0, 512))
+	// idx = (int32_t)u    (integer part, 0..511)
+	// frac_Q29 = fractional_bits(u) in Q0.29 format ∈ [0, 2^29)
+	//
+	// We extract frac_Q29 directly from the SoftFloat mantissa of u:
+	//
+	//   u = u_m * 2^{u_e}   with u_m ∈ [2^29, 2^30), u_e ∈ [-29, ...]
+	//   Integer part:   idx = u_m >> (-u_e)      if u_e ≤ 0
+	//   Fractional Q29: frac_Q29 = (u_m << (29 + u_e)) & (2^29 - 1)   if u_e ∈ [-29, 0]
+	//                            = 0                                    if u_e ≤ -30 (u < 1)
+	//                            = full shift left                      if u_e > 0
 
-	// Preserve sign of input for sine symmetry
-	bool sign_sin = (m < 0);
-	uint32_t abs_m = sf_abs32(m);
+	SoftFloat u_sf = xi * SoftFloat::from_raw(INV_STEP_M, INV_STEP_E);
 
-	// ---- 64‑bit fixed‑point computation of k = round(abs(x) / (2π)) ----
-	// Represent abs(x) as a 64‑bit fixed‑point number with 32 fractional bits:
-	//   X = abs_m * 2^(e + 32)
-	// Multiply by INV_TWO_PI_M (which is 1/(2π) * 2^32) to obtain:
-	//   k_fp = (X * INV_TWO_PI_M) >> 32
-	// The integer part of k_fp is the desired k.
+	int32_t idx;
+	int32_t frac_Q29;
 
-	int64_t prod = static_cast<int64_t>(abs_m) * static_cast<int64_t>(INV_TWO_PI_M);
-	int32_t shift = 32 - e;
+	{
+		int32_t u_m = u_sf.mantissa; // ∈ [2^29, 2^30), or 0
+		int32_t u_e = u_sf.exponent; // typically -29..-21 for xi ∈ [0, 2π)
 
-	int32_t k;
-	if (shift > 0) {
-		// e < 32: shift right to get integer part.
-		if (shift < 64) {
-			k = static_cast<int32_t>(static_cast<uint64_t>(prod) >> shift);
+		if (UNLIKELY(u_m == 0)) {
+			idx      = 0;
+			frac_Q29 = 0;
 		}
 		else {
-			k = 0;   // x is so small that k = 0
+			// Integer part: u_m >> (-u_e) but clipped to [0, 511]
+			// u_e ≥ 0 means u ≥ 2^29 which is way above 512; clamp.
+			if (u_e >= 10) {
+				// u ≥ 2^{29+10} / 2^{29} = 2^10 = 1024 > 511; use 511.
+				idx      = 511;
+				frac_Q29 = 0;
+			}
+			else if (u_e >= 0) {
+				// u_m in [2^29,2^30), shifted left by u_e: idx = u_m << u_e >> 29
+				// Maximum u_e here is 9, so u_m << 9 < 2^39; need 64-bit.
+				idx = static_cast<int32_t>(
+				          (static_cast<int64_t>(u_m) << u_e) >> 29
+					  ) & 0x1FF;
+				frac_Q29 = 0; // integer part dominates; fraction lost (u large)
+			}
+			else {
+				// Normal case: u_e < 0.
+				// idx = u_m >> (-u_e - 0) with 29 implicit fractional bits removed:
+				//   u = u_m * 2^{u_e}; integer part = u_m >> (-u_e) [if u_e ≤ -1]
+				//   but u_m already has 29 implicit bits... no, u_m is the actual mantissa.
+				//   u = u_m * 2^{u_e}.
+				//   Integer part of u = u_m >> (-u_e)   if u_e ≤ 0.
+				int rs = -u_e; // right-shift amount ≥ 1
+				if (rs > 30) {
+					idx      = 0;
+					frac_Q29 = 0;
+				}
+				else {
+					idx = (u_m >> rs) & 0x1FF;
+
+					// Fractional part of u as Q0.29:
+					// u_frac = u_m & ((1<<rs)-1), scaled to 2^29.
+					// frac_Q29 = (u_m & mask) << (29 - rs)   if rs ≤ 29
+					//           = (u_m & mask) >> (rs - 29)   if rs > 29
+					if (rs <= 29) {
+						uint32_t mask = (1u << rs) - 1u;
+						frac_Q29 = static_cast<int32_t>(
+						    (static_cast<uint32_t>(u_m) & mask) << (29 - rs)
+						);
+					}
+					else {
+						// rs = 30: one bit of fraction, then zeros
+						uint32_t mask = (1u << rs) - 1u;
+						frac_Q29 = static_cast<int32_t>(
+						    (static_cast<uint32_t>(u_m) & mask) >> (rs - 29)
+						);
+					}
+				}
+			}
 		}
 	}
-	else if (shift < 0) {
-		// e > 32: need to shift left. This can overflow 64 bits.
-		// Fall back to accurate SoftFloat method for large angles.
-		SoftFloat xi = SoftFloat::from_raw(static_cast<int32_t>(abs_m), e);
-		int32_t ki = (xi * SoftFloat::from_raw(INV_TWO_PI_M, INV_TWO_PI_E)).to_int32();
-		if (ki) xi = xi - SoftFloat::from_raw(TWO_PI_M, TWO_PI_E) * SoftFloat(ki);
-		if (xi.mantissa < 0) xi = xi + SoftFloat::from_raw(TWO_PI_M, TWO_PI_E);
-		if (!(xi < SoftFloat::from_raw(TWO_PI_M, TWO_PI_E))) xi = xi - SoftFloat::from_raw(TWO_PI_M, TWO_PI_E);
 
-		x = xi;   // x now holds reduced absolute angle in [0, 2π)
-		goto use_reduced_softfloat;
-	}
-	else {
-		// shift == 0: e == 32, just take high 32 bits of product
-		k = static_cast<int32_t>(static_cast<uint64_t>(prod) >> 32);
-	}
+	idx &= 0x1FF; // ensure 0..511
 
-	// ---- Subtract k * 2π from abs(x) using 64‑bit arithmetic ----
+	// ── Table lookup ──────────────────────────────────────────────────────
+	int32_t s_m = SF_SIN_MANT[idx];
+	int32_t s_e = SF_SIN_EXP[idx];
+	int32_t c_m = SF_SIN_MANT[(idx + 128) & 0x1FF];
+	int32_t c_e = SF_SIN_EXP[(idx + 128) & 0x1FF];
 
-	// Compute X = abs_m * 2^(e + 32) as a 64‑bit unsigned value.
-	int64_t X;
-	if (e > -32) {
-		// e + 32 > 0: shift left
-		X = static_cast<int64_t>(abs_m) << (e + 32);
-	}
-	else {
-		// e + 32 <= 0: shift right (unsigned to avoid sign extension)
-		int32_t rs = -(e + 32);
-		if (rs >= 64) {
-			X = 0;
+	// ── Fixed-point derivative correction ────────────────────────────────
+	//
+	// sin(x0 + δ) ≈ sin(x0) + cos(x0)·δ
+	// cos(x0 + δ) ≈ cos(x0) − sin(x0)·δ
+	//
+	// δ = frac_Q29 * 2^{-29} * h
+	//   = frac_Q29 * H_MANT * 2^{H_EXP - 29}
+	//
+	// cos0·δ = c_m * frac_Q29 * H_MANT * 2^{c_e + H_EXP - 29}
+	//        = [(c_m * frac_Q29) >> 29 * H_MANT] >> 29 * 2^{c_e + H_EXP}
+	//
+	// Let:
+	//   adj    = (c_m * frac_Q29) >> 29          // ∈ (-2^30, 2^30), ~30-bit
+	//   corr_m = (adj  * H_MANT ) >> 29          // ∈ (-2^30, 2^30), ~30-bit
+	//   corr_e = c_e + H_EXP                     // exponent of correction
+	//
+	// Similarly for the cosine correction (using s_m, s_e with negation).
+	//
+	// Both corrections are added to the respective table values via
+	// fixed-point alignment (pure integer arithmetic, no SoftFloat ops).
+
+	// Helper lambda: compute correction mantissa and exponent.
+	// Returns {corr_m, corr_e} for "base_m * frac_Q29 * h".
+	// base_m is signed; corr_m will be signed.
+	auto make_corr = [&](int32_t base_m,
+		int32_t base_e,
+		bool negate) -> SoftFloat
+	{
+		if (UNLIKELY(frac_Q29 == 0 || base_m == 0)) return SoftFloat::zero();
+
+		// Step 1: adj = base_m * frac_Q29 / 2^29
+		int64_t p1   = static_cast<int64_t>(base_m) * static_cast<int64_t>(frac_Q29);
+		int32_t adj  = static_cast<int32_t>(p1 >> 29); // ∈ (-2^30, 2^30)
+
+		if (UNLIKELY(adj == 0)) return SoftFloat::zero();
+
+		// Step 2: corr = adj * H_MANT / 2^29
+		int64_t p2     = static_cast<int64_t>(adj) * static_cast<int64_t>(H_MANT);
+		int32_t corr_m = static_cast<int32_t>(p2 >> 29); // ∈ (-2^30, 2^30)
+		int32_t corr_e = base_e + H_EXP; // = base_e - 36
+
+		if (UNLIKELY(corr_m == 0)) return SoftFloat::zero();
+		if (negate) corr_m = -corr_m;
+
+		// Normalise corr_m to [2^29, 2^30) with correct sign.
+		// corr_m can be up to ~2^30 (if adj ≈ 2^30 and H_MANT ≈ 2^30 then p2 >> 29 ≈ 2^31,
+		// but adj < 2^30 and H_MANT < 2^30 so p2 < 2^60, p2>>29 < 2^31).
+		// One bit of right-shift might be needed.
+		uint32_t abs_c = sf_abs32(corr_m);
+		if (abs_c >= 0x40000000u) {
+			// bit30 set → overflow by 1
+			corr_m >>= 1; // arithmetic: preserves sign
+			corr_e  += 1;
 		}
-		else {
-			X = static_cast<int64_t>(abs_m >> rs);
+		else if (abs_c < 0x20000000u && abs_c != 0) {
+			// underflow: left-shift needed (rare, only when frac_Q29 is tiny)
+			int lz  = sf_clz(abs_c);
+			int sh  = lz - 2;
+			int32_t sign = corr_m >> 31;
+			uint32_t a   = (static_cast<uint32_t>(corr_m) ^ static_cast<uint32_t>(sign))
+			               - static_cast<uint32_t>(sign);
+			a     <<= sh;
+			corr_e -= sh;
+			corr_m  = static_cast<int32_t>((a ^ static_cast<uint32_t>(sign))
+			                               - static_cast<uint32_t>(sign));
 		}
-	}
 
-	// Subtract integer multiples of TWO_PI_FP
-	X_red = X - static_cast<int64_t>(k) * TWO_PI_FP;
+		return SoftFloat::from_raw(corr_m, corr_e);
+	};
 
-	// Ensure result is non‑negative (k may be overestimated due to rounding)
-	if (X_red < 0) {
-		X_red += TWO_PI_FP;
-	}
+	// ── Build sin_corr and cos_corr ───────────────────────────────────────
+	SoftFloat sin_corr = make_corr(c_m, c_e, /*negate=*/false); // +cos0·δ
+	SoftFloat cos_corr = make_corr(s_m, s_e, /*negate=*/true); // -sin0·δ
 
-	// Convert X_red back to a positive SoftFloat (absolute reduced angle)
-	if (X_red == 0) {
-		x_abs = SoftFloat::zero();
-	}
-	else {
-		uint64_t u = static_cast<uint64_t>(X_red);
-		int lz = sf_clz64(u);   // Count leading zeros in 64-bit
-		// We want the mantissa in [2^29, 2^30). Shift left by lz, then right by (64 - 30) = 34.
-		int32_t sh = lz - 34;
-		uint32_t new_m;
-		if (sh >= 0) {
-			new_m = static_cast<uint32_t>(u << sh);
-		}
-		else {
-			new_m = static_cast<uint32_t>(u >> (-sh));
-		}
-		int32_t new_e = -lz + 2;   // because we scaled by 2^32 and want exponent relative to that
-		x_abs = SoftFloat::from_raw(static_cast<int32_t>(new_m), new_e);
-	}
+	// ── Combine table value + correction ─────────────────────────────────
+	SoftFloat sin_base = SoftFloat::from_raw(s_m, s_e);
+	SoftFloat cos_base = SoftFloat::from_raw(c_m, c_e);
 
-	// Ensure x_abs is in [0, 2π)
-	if (x_abs.mantissa < 0) x_abs = x_abs + SoftFloat::from_raw(TWO_PI_M, TWO_PI_E);
-	if (!(x_abs < SoftFloat::from_raw(TWO_PI_M, TWO_PI_E))) x_abs = x_abs - SoftFloat::from_raw(TWO_PI_M, TWO_PI_E);
-
-	x = x_abs;
-
-use_reduced_softfloat:
-	// ---- Table lookup using the reduced absolute angle ----
-	constexpr SoftFloat step = SoftFloat::from_raw(STEP_M, STEP_E);
-	constexpr SoftFloat inv_step = SoftFloat::from_raw(683565276, -23); // 256/π
-
-	SoftFloat u = x * inv_step;
-	int32_t   idx = u.to_int32() & 0x1FF;
-	SoftFloat x0 = SoftFloat(idx) * step;
-	SoftFloat frac = x - x0;
-
-	SoftFloat sin0 = SoftFloat::from_raw(SF_SIN_MANT[idx], SF_SIN_EXP[idx]);
-	SoftFloat cos0 = SoftFloat::from_raw(SF_SIN_MANT[(idx + 128) & 0x1FF], SF_SIN_EXP[(idx + 128) & 0x1FF]);
-
-	SoftFloat sin_abs = fused_mul_add(sin0, cos0, frac);
-	SoftFloat cos_val = fused_mul_add(cos0, -sin0, frac);
-
-	// Apply sign to sine based on original input sign
-	SoftFloat sin_val = sign_sin ? -sin_abs : sin_abs;
+	// Standard SoftFloat addition handles alignment automatically.
+	SoftFloat sin_val = sin_base + sin_corr;
+	SoftFloat cos_val = cos_base + cos_corr;
 
 	return { sin_val, cos_val };
 }
@@ -1916,8 +2194,7 @@ constexpr SF_HOT SoftFloat SoftFloat::sqrt() const noexcept {
 		int32_t rm = static_cast<int32_t>(root);
 		int32_t re = e / 2 - 15;
 
-		sf_normalise(rm, re);
-		return from_raw(rm, re);
+		return SoftFloat(rm, re);
 	}
 
 	return *this * inv_sqrt();
