@@ -660,9 +660,7 @@ public:
 			// q1 * vn0 < 2^31 (q1<2^15, vn0<2^16); rhat<<16 < 2^32 (rhat<2^16): no overflow.
 			if (q1 * vn0 > (rhat << 16)) {
 				--q1; rhat += vn1;
-				// After first correction rhat < 2*vn1 < 2^17. Guard against
-				// (rhat<<16) overflow before the second comparison.
-				if (rhat < 0x10000u && q1 * vn0 >(rhat << 16)) --q1;
+				if (q1 * vn0 > (rhat << 16)) --q1; // bare second check
 			}
 			// un21 = ua*2^16 - q1*v, computed overflow-free via the remainder.
 			// rhat < 2^16 here ⟹ (rhat<<16) < 2^32; q1*vn0 ≤ (rhat<<16) ⟹ result ≥ 0.
@@ -681,7 +679,7 @@ public:
 
 			if (q0 * vn0 > (rhat << 16)) {
 				--q0; rhat += vn1;
-				if (rhat < 0x10000u && q0 * vn0 >(rhat << 16)) --q0;
+				if (q0 * vn0 > (rhat << 16)) --q0; // bare second check
 			}
 
 			uint32_t qm = (q1 << 16) | q0;  // ∈ [2^29, 2^31)
@@ -950,36 +948,85 @@ private:
 	// Both inputs have abs in [2^29,2^30). Product in [2^58,2^60).
 	// >> 29 gives [2^29,2^31) => at most one bit of adjustment.
 	[[nodiscard]] static constexpr SF_INLINE SF_FLATTEN
-		SoftFloat mul_plain(SoftFloat a, SoftFloat b) noexcept {
-		if (UNLIKELY(!a.mantissa || !b.mantissa)) return {};
+	SoftFloat mul_plain(SoftFloat a, SoftFloat b) noexcept {
+		if (UNLIKELY(!a.mantissa || !b.mantissa)) return { };
 
-		// 1. Multiply
-		int64_t prod = static_cast<int64_t>(a.mantissa) * b.mantissa;
-
-		// 2. Pre-shift. 
-		// Product is in [2^58, 2^60).
-		// Shift right by 29 to get potential mantissa in [2^29, 2^31).
-		int32_t rm = static_cast<int32_t>(prod >> 29);
 		int32_t re = a.exponent + b.exponent + 29;
 
-		// 3. Normalize (Signed Safe)
-		// We only need to check if magnitude >= 2^30.
-		// Use abs helper to handle signed rm correctly.
-		uint32_t abs_m = sf_abs32(rm);
+#if defined(__arm__)
+		if (!SF_IS_CONSTEVAL()) {
+			// ── Cortex-M3 fast path ────────────────────────────────────────
+			//
+			// SMULL gives the full 64-bit signed product in {lo_r, hi_r}.
+			//
+			// rm = prod >> 29 (arithmetic):
+			//   = (hi_r << 3) | (lo_r >> 29)
+			//
+			// Overflow detection:
+			//   We need abs(rm) >= 2^30, i.e. bit30 set in abs(rm).
+			//   abs(rm) ≈ rm ^ (rm asr 31)  [exact for positive; abs(rm)-1 for negative;
+			//                                 bit30 is correct in both cases]
+			//   TST that against 0x40000000.
+			//
+			// Cycle count (Cortex-M3 in-order):
+			//   SMULL          : 3–5 cy
+			//   MOV + ORR      : 2 cy  (depend on SMULL outputs)
+			//   EOR + TST      : 2 cy  (depend on rm)
+			//   IT NE + ASRNE  : 1 cy  (conditional, no flush)
+			//   IT NE + ADDNE  : 1 cy
+			//   Total          : ~9–11 cy  (vs ~12+ with branch)
 
-		if (UNLIKELY(abs_m >= 0x40000000u)) {
-			// Overflow by 1 bit (or more if inputs were edge cases)
-			// Arithmetic shift right preserves sign.
-			rm >>= 1;
-			re += 1;
+			int32_t rm, lo_r, hi_r, tmp;
+
+			__asm__(
+			    // 64-bit signed multiply
+			    "smull  %[lo], %[hi], %[am], %[bm]         \n\t"
+
+			    // rm = arithmetic (prod >> 29)
+			    //    = (hi_r << 3) | (lo_r >>> 29)
+			    "mov    %[rm],  %[hi], lsl #3               \n\t"
+			    "orr    %[rm],  %[rm], %[lo], lsr #29       \n\t"
+
+			    // Overflow detection: abs(rm) >= 2^30?
+			    // tmp = rm ^ (rm asr 31)  — bit30 set iff abs(rm) >= 2^30
+			    "eor    %[tmp], %[rm], %[rm], asr #31       \n\t"
+			    "tst    %[tmp], #0x40000000                  \n\t"
+
+			    // Branch-free correction: if bit30 set, rm >>= 1 and re += 1
+			    "it     ne                                  \n\t"
+			    "asrne  %[rm],  %[rm], #1                   \n\t"
+			    "it     ne                                  \n\t"
+			    "addne  %[re],  %[re], #1                   \n\t"
+
+			    : [rm]  "=&r" (rm),
+				[lo]  "=&r" (lo_r),
+				[hi]  "=&r" (hi_r),
+				[tmp] "=&r" (tmp),
+				[re]  "+r"  (re)
+			  : [am]  "r"  (a.mantissa),
+				[bm]  "r"  (b.mantissa)
+			  : "cc");
+
+			re = sf_sat_exp_fast(re);
+			return from_raw(rm, re);
 		}
+#endif
 
-		// Note: Multiplication cannot underflow (shift left needed) unless 
-		// one input was effectively zero, which we checked.
-		// The result of norm mults is always >= 2^29.
+		// ── Portable / consteval path ─────────────────────────────────────────
+		{
+			int64_t  prod  = static_cast<int64_t>(a.mantissa)
+			               * static_cast<int64_t>(b.mantissa);
+			int32_t  rm    = static_cast<int32_t>(prod >> 29);
+			uint32_t abs_m = sf_abs32(rm);
 
-		re = sf_sat_exp_fast(re);
-		return from_raw(rm, re);
+			if (UNLIKELY(abs_m >= 0x40000000u)) {
+				rm >>= 1;
+				re  += 1;
+			}
+
+			re = sf_sat_exp_fast(re);
+			return from_raw(rm, re);
+		}
 	}
 
 	// from_float — parse IEEE 754 single, constexpr via std::bit_cast
@@ -1424,565 +1471,277 @@ constexpr SoftFloat SoftFloat::tan() const noexcept {
 
 #else
 
-static constexpr int32_t SF_SIN_MANT[512] = {
-	           0,  843293690,  843230191,  632343275,  842976226, 1053482228,  631914790,  736993301,
-	   841960824,  946801551, 1051499693,  578019742,  630202589,  682290530,  734275721,  786150333,
-	   837906553,  889536587,  941032661,  992387019, 1043591926,  547319836,  572761285,  598116479,
-	   623381598,  648552838,  673626408,  698598533,  723465451,  748223418,  772868706,  797397602,
-	   821806413,  846091463,  870249095,  894275671,  918167572,  941921200,  965532978,  988999351,
-	  1012316784, 1035481766, 1058490808,  540670223,  552013618,  563273883,  574449320,  585538248,
-	   596538995,  607449906,  618269338,  628995660,  639627258,  650162530,  660599890,  670937767,
-	   681174602,  691308855,  701339000,  711263525,  721080937,  730789757,  740388522,  749875788,
-	   759250125,  768510122,  777654384,  786681534,  795590213,  804379079,  813046808,  821592095,
-	   830013654,  838310216,  846480531,  854523370,  862437520,  870221790,  877875009,  885396022,
-	   892783698,  900036924,  907154608,  914135678,  920979082,  927683790,  934248793,  940673101,
-	   946955747,  953095785,  959092290,  964944360,  970651112,  976211688,  981625251,  986890984,
-	   992008094,  996975812, 1001793390, 1006460100, 1010975242, 1015338134, 1019548121, 1023604567,
-	  1027506862, 1031254418, 1034846671, 1038283080, 1041563127, 1044686319, 1047652185, 1050460278,
-	  1053110176, 1055601479, 1057933813, 1060106826, 1062120190, 1063973603, 1065666786, 1067199483,
-	  1068571464, 1069782521, 1070832474, 1071721163, 1072448455, 1073014240, 1073418433, 1073660973,
-	   536870912, 1073660973, 1073418433, 1073014240, 1072448455, 1071721163, 1070832474, 1069782521,
-	  1068571464, 1067199483, 1065666786, 1063973603, 1062120190, 1060106826, 1057933813, 1055601479,
-	  1053110176, 1050460278, 1047652185, 1044686319, 1041563127, 1038283080, 1034846671, 1031254418,
-	  1027506862, 1023604567, 1019548121, 1015338134, 1010975242, 1006460100, 1001793390,  996975812,
-	   992008094,  986890984,  981625251,  976211688,  970651112,  964944360,  959092290,  953095785,
-	   946955747,  940673101,  934248793,  927683790,  920979082,  914135678,  907154608,  900036924,
-	   892783698,  885396022,  877875009,  870221790,  862437520,  854523370,  846480531,  838310216,
-	   830013654,  821592095,  813046808,  804379079,  795590213,  786681534,  777654384,  768510122,
-	   759250125,  749875788,  740388522,  730789757,  721080937,  711263525,  701339000,  691308855,
-	   681174602,  670937767,  660599890,  650162530,  639627258,  628995660,  618269338,  607449906,
-	   596538995,  585538248,  574449320,  563273883,  552013618,  540670223, 1058490808, 1035481766,
-	  1012316784,  988999351,  965532978,  941921200,  918167572,  894275671,  870249095,  846091463,
-	   821806413,  797397602,  772868706,  748223418,  723465451,  698598533,  673626408,  648552838,
-	   623381598,  598116479,  572761285,  547319836, 1043591926,  992387019,  941032661,  889536587,
-	   837906553,  786150333,  734275721,  682290530,  630202589,  578019742, 1051499693,  946801551,
-	   841960824,  736993301,  631914790, 1053482228,  842976226,  632343275,  843230191,  843293690,
-	   592202854, -843293690, -843230191, -632343275, -842976226,-1053482228, -631914790, -736993301,
-	  -841960824, -946801551,-1051499693, -578019742, -630202589, -682290530, -734275721, -786150333,
-	  -837906553, -889536587, -941032661, -992387019,-1043591926, -547319836, -572761285, -598116479,
-	  -623381598, -648552838, -673626408, -698598533, -723465451, -748223418, -772868706, -797397602,
-	  -821806413, -846091463, -870249095, -894275671, -918167572, -941921200, -965532978, -988999351,
-	 -1012316784,-1035481766,-1058490808, -540670223, -552013618, -563273883, -574449320, -585538248,
-	  -596538995, -607449906, -618269338, -628995660, -639627258, -650162530, -660599890, -670937767,
-	  -681174602, -691308855, -701339000, -711263525, -721080937, -730789757, -740388522, -749875788,
-	  -759250125, -768510122, -777654384, -786681534, -795590213, -804379079, -813046808, -821592095,
-	  -830013654, -838310216, -846480531, -854523370, -862437520, -870221790, -877875009, -885396022,
-	  -892783698, -900036924, -907154608, -914135678, -920979082, -927683790, -934248793, -940673101,
-	  -946955747, -953095785, -959092290, -964944360, -970651112, -976211688, -981625251, -986890984,
-	  -992008094, -996975812,-1001793390,-1006460100,-1010975242,-1015338134,-1019548121,-1023604567,
-	 -1027506862,-1031254418,-1034846671,-1038283080,-1041563127,-1044686319,-1047652185,-1050460278,
-	 -1053110176,-1055601479,-1057933813,-1060106826,-1062120190,-1063973603,-1065666786,-1067199483,
-	 -1068571464,-1069782521,-1070832474,-1071721163,-1072448455,-1073014240,-1073418433,-1073660973,
-	  -536870912,-1073660973,-1073418433,-1073014240,-1072448455,-1071721163,-1070832474,-1069782521,
-	 -1068571464,-1067199483,-1065666786,-1063973603,-1062120190,-1060106826,-1057933813,-1055601479,
-	 -1053110176,-1050460278,-1047652185,-1044686319,-1041563127,-1038283080,-1034846671,-1031254418,
-	 -1027506862,-1023604567,-1019548121,-1015338134,-1010975242,-1006460100,-1001793390, -996975812,
-	  -992008094, -986890984, -981625251, -976211688, -970651112, -964944360, -959092290, -953095785,
-	  -946955747, -940673101, -934248793, -927683790, -920979082, -914135678, -907154608, -900036924,
-	  -892783698, -885396022, -877875009, -870221790, -862437520, -854523370, -846480531, -838310216,
-	  -830013654, -821592095, -813046808, -804379079, -795590213, -786681534, -777654384, -768510122,
-	  -759250125, -749875788, -740388522, -730789757, -721080937, -711263525, -701339000, -691308855,
-	  -681174602, -670937767, -660599890, -650162530, -639627258, -628995660, -618269338, -607449906,
-	  -596538995, -585538248, -574449320, -563273883, -552013618, -540670223,-1058490808,-1035481766,
-	 -1012316784, -988999351, -965532978, -941921200, -918167572, -894275671, -870249095, -846091463,
-	  -821806413, -797397602, -772868706, -748223418, -723465451, -698598533, -673626408, -648552838,
-	  -623381598, -598116479, -572761285, -547319836,-1043591926, -992387019, -941032661, -889536587,
-	  -837906553, -786150333, -734275721, -682290530, -630202589, -578019742,-1051499693, -946801551,
-	  -841960824, -736993301, -631914790,-1053482228, -842976226, -632343275, -843230191, -843293690
+// ── C++ table definitions ───────────────────────────────────────────
+
+static constexpr int32_t SF_SIN_MANT[257] = {
+	         0, 843230191, 842976226, 631914790, 841960824,	1051499693, 630202589, 734275721,
+	837906553, 941032661, 1043591926, 572761285, 623381598,	673626408, 723465451, 772868706,
+	821806413, 870249095, 918167572, 965532978, 1012316784, 1058490808,	552013618, 574449320,
+	596538995, 618269338, 639627258, 660599890, 681174602, 701339000,	721080937, 740388522,
+	759250125, 777654384, 795590213, 813046808, 830013654, 846480531, 862437520,	877875009,
+	892783698, 907154608, 920979082, 934248793, 946955747, 959092290, 970651112,	981625251,
+	992008094, 1001793390, 1010975242, 1019548121, 1027506862, 1034846671, 1041563127,	1047652185,
+	1053110176,	1057933813, 1062120190, 1065666786, 1068571464, 1070832474, 1072448455, 1073418433,
+	536870912,	1073418433, 1072448455, 1070832474, 1068571464, 1065666786, 1062120190, 1057933813,
+	1053110176,	1047652185, 1041563127, 1034846671, 1027506862, 1019548121, 1010975242, 1001793390,
+	992008094,	981625251, 970651112, 959092290, 946955747, 934248793, 920979082, 907154608,
+	892783698, 877875009, 862437520, 846480531, 830013654, 813046808, 795590213, 777654384,
+	759250125, 740388522, 721080937, 701339000, 681174602, 660599890, 639627258, 618269338,
+	596538995, 574449320, 552013618, 1058490808, 1012316784, 965532978, 918167572, 870249095,
+	821806413, 772868706, 723465451, 673626408, 623381598, 572761285, 1043591926, 941032661,
+	837906553, 734275721, 630202589, 1051499693, 841960824, 631914790, 842976226, 843230191,
+	592202854, -843230191, -842976226, -631914790, -841960824, -1051499693, -630202589, -734275721,
+	-837906553, -941032661, -1043591926, -572761285, -623381598, -673626408, -723465451, -772868706,
+	-821806413, -870249095, -918167572, -965532978, -1012316784, -1058490808, -552013618, -574449320,
+	-596538995, -618269338, -639627258, -660599890, -681174602, -701339000, -721080937, -740388522,
+	-759250125, -777654384, -795590213, -813046808, -830013654, -846480531, -862437520, -877875009,
+	-892783698, -907154608, -920979082, -934248793, -946955747, -959092290, -970651112, -981625251,
+	-992008094, -1001793390, -1010975242, -1019548121, -1027506862, -1034846671, -1041563127, -1047652185,
+	-1053110176, -1057933813, -1062120190, -1065666786, -1068571464, -1070832474, -1072448455, -1073418433,
+	-536870912, -1073418433, -1072448455, -1070832474, -1068571464, -1065666786, -1062120190, -1057933813,
+	-1053110176, -1047652185, -1041563127, -1034846671, -1027506862, -1019548121, -1010975242, -1001793390,
+	-992008094, -981625251, -970651112, -959092290, -946955747, -934248793, -920979082,	-907154608,
+	-892783698, -877875009, -862437520, -846480531, -830013654, -813046808, -795590213, -777654384,
+	-759250125,	-740388522, -721080937, -701339000, -681174602, -660599890, -639627258, -618269338,
+	-596538995,	-574449320, -552013618, -1058490808, -1012316784, -965532978, -918167572, -870249095,
+	-821806413, -772868706,	-723465451, -673626408, -623381598, -572761285, -1043591926, -941032661,
+	-837906553, -734275721,	-630202589, -1051499693, -841960824, -631914790, -842976226, -843230191,
+	0,
 };
 
-static constexpr int8_t  SF_SIN_EXP[512] = {
-	  0,-36,-35,-34,-34,-34,-33,-33,-33,-33,-33,-32,-32,-32,-32,-32,
-	-32,-32,-32,-32,-32,-31,-31,-31,-31,-31,-31,-31,-31,-31,-31,-31,
-	-31,-31,-31,-31,-31,-31,-31,-31,-31,-31,-31,-30,-30,-30,-30,-30,
-	-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,
-	-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,
-	-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,
-	-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,
-	-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,
-	-29,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,
-	-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,
-	-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,
-	-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,
-	-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,
-	-30,-30,-30,-30,-30,-30,-31,-31,-31,-31,-31,-31,-31,-31,-31,-31,
-	-31,-31,-31,-31,-31,-31,-31,-31,-31,-31,-31,-31,-32,-32,-32,-32,
-	-32,-32,-32,-32,-32,-32,-33,-33,-33,-33,-33,-34,-34,-34,-35,-36,
-	-82,-36,-35,-34,-34,-34,-33,-33,-33,-33,-33,-32,-32,-32,-32,-32,
-	-32,-32,-32,-32,-32,-31,-31,-31,-31,-31,-31,-31,-31,-31,-31,-31,
-	-31,-31,-31,-31,-31,-31,-31,-31,-31,-31,-31,-30,-30,-30,-30,-30,
-	-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,
-	-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,
-	-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,
-	-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,
-	-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,
-	-29,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,
-	-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,
-	-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,
-	-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,
-	-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,
-	-30,-30,-30,-30,-30,-30,-31,-31,-31,-31,-31,-31,-31,-31,-31,-31,
-	-31,-31,-31,-31,-31,-31,-31,-31,-31,-31,-31,-31,-32,-32,-32,-32,
-	-32,-32,-32,-32,-32,-32,-33,-33,-33,-33,-33,-34,-34,-34,-35,-36
+static constexpr int8_t SF_SIN_EXP[257] = {
+	  0, -35, -34, -33, -33, -33, -32, -32,
+	-32, -32, -32, -31, -31, -31, -31, -31,
+	-31, -31, -31, -31,	-31, -31, -30, -30,
+	-30, -30, -30, -30, -30, -30, -30, -30,
+	-30, -30, -30, -30,	-30, -30, -30, -30,
+	-30, -30, -30, -30,	-30, -30, -30, -30,
+	-30, -30, -30, -30,	-30, -30, -30, -30,
+	-30, -30, -30, -30, -30, -30, -30, -30,
+	-29, -30, -30, -30, -30, -30, -30, -30,
+	-30, -30, -30, -30, -30, -30, -30, -30,
+	-30, -30, -30, -30, -30, -30, -30, -30,
+	-30, -30, -30, -30, -30, -30, -30, -30,
+	-30, -30, -30, -30, -30, -30, -30, -30,
+	-30, -30, -30, -31, -31, -31, -31, -31,
+	-31, -31, -31, -31, -31, -31, -32, -32,
+	-32, -32, -32, -33, -33, -33, -34, -35,
+	-82, -35, -34, -33, -33, -33, -32, -32,
+	-32, -32, -32, -31, -31, -31, -31, -31,
+	-31, -31, -31, -31, -31, -31, -30, -30,
+	-30, -30, -30, -30, -30, -30, -30, -30,
+	-30, -30, -30, -30, -30, -30, -30, -30,
+	-30, -30, -30, -30, -30, -30, -30, -30,
+	-30, -30, -30, -30, -30, -30, -30, -30,
+	-30, -30, -30, -30, -30, -30, -30, -30,
+	-29, -30, -30, -30, -30, -30, -30, -30,
+	-30, -30, -30, -30, -30, -30, -30, -30,
+	-30, -30, -30, -30, -30, -30, -30, -30,
+	-30, -30, -30, -30, -30, -30, -30, -30,
+	-30, -30, -30, -30, -30, -30, -30, -30,
+	-30, -30, -30, -31, -31, -31, -31, -31,
+	-31, -31, -31, -31, -31, -31, -32, -32,
+	-32, -32, -32, -33, -33, -33, -34, -35,
+	0,
 };
 
-#if 1
-// Internal: fixed-point sincos interpolation.
-//
-// Table entries are normalised SoftFloat values with mantissa in [2^29, 2^30)
-// and exponent in [-36, -29].  The maximum entry magnitude is 1.0 (at idx=128,
-// the 90° peak), stored as {536870912, -29} = 2^29 * 2^-29 = 1.0.
-//
-// Strategy
-// --------
-// 1. Range-reduce x into [0, 2π) using integer arithmetic on the SoftFloat
-//    representation (one multiply + one subtract, both already present).
-//
-// 2. Convert the reduced angle to a Q-format fixed-point index:
-//
-//      idx_Q = round(x * (512 / 2π))
-//
-//    where 512/2π = 81.4873..., stored as a normalised SoftFloat constant.
-//    to_int32() gives the integer part (table index), and the remainder
-//    drives the interpolation.
-//
-// 3. Fixed-point interpolation.
-//
-//    Let h = step = 2π/512.  Within a table cell:
-//
-//      sin(x0 + δ) ≈ sin(x0) + cos(x0)·δ
-//      cos(x0 + δ) ≈ cos(x0) − sin(x0)·δ
-//
-//    We need δ = x − x0.  Rather than computing x0 = idx * h in SoftFloat
-//    and subtracting, we note that after computing:
-//
-//      u = x * (512 / 2π)      [SoftFloat, exact to ~30 bits]
-//
-//    the fractional part of u is (x − x0) / h, i.e. δ/h ∈ [0,1).
-//    We extract this as an integer with 29 fractional bits:
-//
-//      frac_Q29 = (u.mantissa << (−u.exponent − 1)) & mask   [if u.exponent ≤ -1]
-//
-//    Then  δ = (frac_Q29 / 2^29) * h,  so:
-//
-//      sin0 + cos0·δ = sin0 + cos0 * h * (frac_Q29 / 2^29)
-//
-//    Pre-folding h = 2π/512 into the scaling:
-//
-//      correction_mantissa = (cos0.mantissa * frac_Q29) >> 29   [signed SMULL >> 29]
-//
-//    and the exponent of the correction is:
-//
-//      correction_exp = cos0.exponent + h_exp
-//                     = cos0.exponent + (−28 − 9)          [h = 2π/512 ≈ m·2^-37, so h_exp ≈ -37 + (-28) ... ]
-//
-//    More precisely, h = π/256.  π = 843314857 * 2^-28, so
-//    h = 843314857 * 2^-28 / 256 = 843314857 * 2^-36.
-//    Mantissa is already in [2^29,2^30) with exponent -36, so h ≡ {843314857, -36}.
-//
-//    The product  cos0 * (frac_Q29/2^29) * h  has:
-//      mantissa ≈ cos0.mantissa * frac_Q29 >> 29   (both ~30-bit, product ~60-bit)
-//      exponent  = cos0.exponent + h.exponent + correction
-//               = cos0.exponent + (-36) + (29-29) ... [see derivation below]
-//
-// Full derivation
-// ---------------
-//   frac_Q29 represents  δ/h  in Q0.29 format, i.e.
-//       δ/h = frac_Q29 * 2^{-29}
-//   so  δ = h * frac_Q29 * 2^{-29}
-//         = (h_m * 2^{h_e}) * (frac_Q29 * 2^{-29})
-//         = h_m * frac_Q29 * 2^{h_e - 29}
-//
-//   cos0 = c_m * 2^{c_e}
-//
-//   cos0 * δ = c_m * h_m * frac_Q29 * 2^{c_e + h_e - 29}
-//
-//   Product c_m * h_m is ~60 bits; shift right by 29 to normalise:
-//   ⇒ mantissa ≈ (c_m * frac_Q29) >> 29   [fits int32_t since frac_Q29 < 2^29]
-//      exponent  = c_e + h_e                [no extra -29 because we absorbed it in the >> 29]
-//
-//   Wait — let's be careful:
-//     (c_m * frac_Q29) has ~59 bits (c_m < 2^30, frac_Q29 < 2^29).
-//     We shift right by 29 ⇒ result has ~30 bits.
-//     The implicit 2^{-29} from frac_Q29's Q format AND the 2^{-29} from the shift
-//     give 2^{-58} … but we only shifted by 29, giving 2^{-29}.
-//
-//   Reconcile:
-//     Actual value = c_m * 2^{c_e}  *  frac_Q29 * 2^{-29}  *  h_m * 2^{h_e}
-//     Let P = (c_m * frac_Q29) in integer arithmetic.
-//     P >> 29  has value  P * 2^{-29}  =  c_m * frac_Q29 * 2^{-29}.
-//     Actual value = (P >> 29) * 2^{c_e} * h_m * 2^{h_e}.
-//     But we also need to fold in h_m (=843314857 ≈ 2^{29.65}).
-//
-//   Simplification — fold h into a single integer multiplier:
-//     Since h_m is a constant, we precompute:
-//       scaled_frac = (frac_Q29 * h_m) >> 29   [≈ frac_Q29 * 1.570..., result < 2^29 * π/2]
-//     Actually this overflows: frac_Q29 < 2^29, h_m < 2^30 ⇒ product < 2^59, fits int64_t.
-//     Then:
-//       cos0 * δ  mantissa ≈ (c_m * scaled_frac) >> 29
-//       exponent  = c_e + h_e + 0           where the 29+29-29=29 shifts were folded.
-//
-//   Let's redo cleanly with explicit 64-bit:
-//
-//     // Step A: δ in Q0.29, scaled by h_m
-//     int64_t sfrac = (int64_t)frac_Q29 * H_MANT;          // < 2^59
-//     int32_t sfrac32 = (int32_t)(sfrac >> 29);             // < 2^30, represents frac * h_m/2^29
-//                                                            // = frac * h / 2^{h_e}  (h_m/2^29 ≈ 1.0 for π/256)
-//
-//     Wait — h_m = 843314857 ≈ π * 2^28; frac ∈ [0,1); frac_Q29 < 2^29.
-//     sfrac32 = frac_Q29 * h_m >> 29 ≈ frac * 2^29 * π * 2^28 >> 29 = frac * π * 2^28.
-//     So sfrac32 represents  δ * 2^{-h_e} / (frac * h)  ... getting complicated.
-//
-// Cleaner approach — use the observation that the correction is SMALL.
-// -----------------------------------------------------------------------
-// The table has 512 entries per 2π, so the maximum δ is h = 2π/512 ≈ 0.01227.
-// The maximum |cos0| is 1.0.  So |cos0 * δ| ≤ 0.01227, which is about 2^{-6.3}.
-//
-// Both sin0 and cos0 have exponents in [-36, -29].
-// The correction exponent = cos0.exponent + h.exponent_contribution.
-// h = 843314857 * 2^{-36}  ≈ 0.01227,  so h contributes exponent = -36 relative to a
-// unit-normalised cos0.
-//
-// More precisely, if cos0 = c_m * 2^{c_e} with c_m in [2^29,2^30):
-//   correction = c_m * frac * 2^{c_e}  * h
-//              = c_m * frac * 2^{c_e}  * h_m * 2^{-36}
-// where frac = frac_Q29 * 2^{-29}.
-//
-//   correction_val = (c_m * frac_Q29 * h_m) >> (29 + 29)  [to get integer part of 30-bit mantissa]
-//                  * 2^{c_e + (-36) + 29 + 29 - 58}
-//   Hmm: c_m * frac_Q29 * h_m is up to 2^{30+29+30} = 2^{89}, doesn't fit 64-bit.
-//
-// -----------------------------------------------------------------------
-// FINAL APPROACH: Two-step fixed-point, using the fact that frac_Q29 < 2^29.
-//
-//   1. Compute  adj = (c_m * frac_Q29) >> 29.
-//      c_m ∈ [2^29, 2^30), frac_Q29 ∈ [0, 2^29).
-//      Product < 2^59, fits int64_t.
-//      adj < 2^30.
-//      This represents  c_m * (frac_Q29 / 2^29) = c_m * (δ/h).
-//
-//   2. The actual correction is  adj * h = adj * h_m * 2^{h_e}.
-//      adj is an integer with the same "unit" as c_m (i.e., represents adj * 2^{c_e}).
-//      correction = adj_m * 2^{c_e}  *  h_m * 2^{h_e}  [but adj < 2^30, h_m < 2^30 → product up to 2^60]
-//      correction_m = (adj * h_m) >> 29
-//      correction_e = c_e + h_e
-//      where h_e = -36  and h_m = 843314857.
-//      correction_m = ((c_m * frac_Q29 >> 29) * h_m) >> 29
-//      correction_e = c_e + (-36)
-//
-//   This is exact enough.  adj is up to 2^30, h_m < 2^30, so adj*h_m < 2^60: fits int64_t.
-//
-//   3. Since the correction is small (< 0.01228) and sin0/cos0 are in [0,1],
-//      we must add them with proper exponent alignment.
+// =========================================================================
+// sf_sincos — 256-entry table, linear interpolation
 //
 // =========================================================================
-//
-// IMPLEMENTATION
-// =========================================================================
-//
-//   Inputs: idx ∈ [0, 511], frac_Q29 ∈ [0, 2^29)
-//
-//   sin0 = SF_SIN_MANT[idx] * 2^{SF_SIN_EXP[idx]}   (signed)
-//   cos0 = SF_SIN_MANT[(idx+128)&511] * 2^{SF_SIN_EXP[(idx+128)&511]}
-//
-//   Correction for sin:  +cos0 * δ
-//   Correction for cos:  -sin0 * δ
-//
-//   δ = frac_Q29 * 2^{-29} * h = frac_Q29 * h_m * 2^{h_e - 29}
-//
-//   Let F = frac_Q29.  (F ∈ [0, 2^29))
-//
-//   For sin correction:
-//     P = (int64_t)cos0.m * F               // < 2^59, signed
-//     adj = P >> 29                          // ∈ (-2^30, 2^30), represents cos0 * F/2^29
-//     Q = (int64_t)adj * H_MANT             // adj < 2^30, H_MANT < 2^30 ⇒ < 2^60
-//     corr_m = (int32_t)(Q >> 29)           // ∈ (-2^31, 2^31) — might be slightly > 2^30
-//     corr_e = cos0.e + H_EXP               // = cos0.e - 36
-//
-//   Now add sin0 (mantissa s_m, exponent s_e) + corr (mantissa corr_m, exponent corr_e):
-//     Standard SoftFloat addition with alignment shift.
-//
-//   The correction magnitude is ≤ 1.0 * 0.01228 * 2^30 ≈ 1.318 * 10^7.
-//   sin0 magnitude is in [2^29, 2^30) = [5.37e8, 1.07e9].
-//   So the correction can be up to ~1.2% of the main value, which is 2^{-6.3} relative.
-//   Exponent difference is: corr_e - sin0.e = (cos0.e - 36) - sin0.e.
-//   Since sin0.e and cos0.e are both in [-36, -29], corr_e ∈ [-72, -65].
-//   sin0.e ∈ [-36, -29].  Difference = corr_e - sin0.e ∈ [-72-(-29), -65-(-36)] = [-43, -29].
-//   This is always negative and ≤ -29, so the correction is always a right-shift of corr.
-//
-//   But wait: the correction is already small, so after alignment we might lose all precision
-//   if the shift is too large.  In the worst case (sin0.e = -29, corr_e = -72), shift = 43 bits,
-//   meaning the correction is completely lost.  That's fine — it's below the 30-bit precision
-//   of the representation.
-//
-//   In practice, near the peaks (sin0 ≈ 1, cos0 ≈ 0), cos0.e is very negative and the correction
-//   is tiny, which is correct.  Near the zero-crossings (sin0 ≈ 0, cos0 ≈ 1), the correction
-//   matters most and cos0.e ≈ -29 (minimum negative), giving shift ≈ 29 + 36 - sin0.e.
-//   But sin0.e is also very negative near the zero-crossing, making the shift small.
-//
-// =========================================================================
+[[nodiscard]] constexpr SF_HOT SoftFloatPair sf_sincos(SoftFloat x) noexcept {
 
-constexpr SF_HOT SoftFloatPair sf_sincos(SoftFloat x) noexcept {
-	// ── Constants ────────────────────────────────────────────────────────
-	// inv_two_pi = 1/(2π): 683565276 * 2^-32 ≈ 0.15915494...
-	constexpr int32_t INV_2PI_M = 683565276;
-	constexpr int32_t INV_2PI_E = -32;
+	// inv_two_pi = 1/(2π) ≈ 0.1591549431	
+	constexpr int32_t INV_2PI_M  = 683565276;
+	constexpr int32_t INV_2PI_E  = -32;
 
-	// two_pi = 2π: 843314857 * 2^-27 ≈ 6.28318530...
-	constexpr int32_t TWO_PI_M  = 843314857;
-	constexpr int32_t TWO_PI_E  = -27;
+	// two_pi = 2π ≈ 6.2831853072
+	constexpr int32_t TWO_PI_M   = 843314857;
+	constexpr int32_t TWO_PI_E   = -27;
 
-	// inv_step = 512/(2π) = 256/π: 683565276 * 2^-23 ≈ 81.4873...
-	// Used to map reduced angle → table index.
-	// 683565276 * 2^-23 = 683565276 / 8388608 = 81.4873...  ✓
-	constexpr int32_t INV_STEP_M = 683565276;
-	constexpr int32_t INV_STEP_E = -23;
+	// inv_step = 256/(2π) = 128/π ≈ 40.7436654315
+	constexpr int32_t INV_STEP_M = 683565276; // same mantissa as INV_2PI
+	constexpr int32_t INV_STEP_E = -24; 
 
-	// h = 2π/512 = π/256: 843314857 * 2^-36
-	// This is the angle step between table entries.
-	constexpr int32_t H_MANT = 843314857;
-	constexpr int32_t H_EXP  = -36; // h = H_MANT * 2^H_EXP
+	// h = 2π/256 = π/128 ≈ 0.0245436926
+	constexpr int32_t H_MANT     = 843314857; // same mantissa as π
+	constexpr int32_t H_EXP      = -35; 
 
-	// ── Handle zero ───────────────────────────────────────────────────────
+	// ── Handle zero ────────────────────────────────────────────────────────
 	if (UNLIKELY(x.mantissa == 0)) {
 		return { SoftFloat::zero(), SoftFloat::one() };
 	}
 
-	// ── Range reduction: x → [0, 2π) ────────────────────────────────────
-	// k = round-toward-zero(x / 2π)  [integer number of full cycles to remove]
+	// ── Range reduction: x → [0, 2π) ──────────────────────────────────────
 	SoftFloat xi = x;
 	{
-		// Multiply by 1/(2π) and truncate to integer.
 		int32_t ki = (x * SoftFloat::from_raw(INV_2PI_M, INV_2PI_E)).to_int32();
 		if (ki != 0) {
-			// Subtract ki * 2π to reduce x into (-2π, 2π).
 			xi = x - SoftFloat(ki) * SoftFloat::from_raw(TWO_PI_M, TWO_PI_E);
 		}
-		// Clamp to [0, 2π) — at most two corrections needed.
 		SoftFloat two_pi = SoftFloat::from_raw(TWO_PI_M, TWO_PI_E);
 		if (xi.mantissa < 0)   xi = xi + two_pi;
 		if (!(xi < two_pi))    xi = xi - two_pi;
 	}
 
-	// ── Map reduced angle to table index + fixed-point fraction ──────────
+	// ── Map reduced angle to table index + fixed-point fraction ───────────
 	//
-	// u = xi * inv_step   (u ∈ [0, 512))
-	// idx = (int32_t)u    (integer part, 0..511)
-	// frac_Q29 = fractional_bits(u) in Q0.29 format ∈ [0, 2^29)
+	// u = xi * inv_step   (u ∈ [0, 256))
+	// idx      = floor(u) & 0xFF    ← 8-bit index, was 9-bit (0x1FF)
+	// frac_Q29 = fractional part of u in Q0.29 format ∈ [0, 2^29)
 	//
-	// We extract frac_Q29 directly from the SoftFloat mantissa of u:
+	// Extraction logic is identical to the 512-entry version except:
+	//   - mask is 0xFF  instead of 0x1FF
+	//   - u_e threshold for "u ≥ table size" is 8 instead of 9
+	//     (2^{29+8}/2^{29} = 2^8 = 256)
 	//
-	//   u = u_m * 2^{u_e}   with u_m ∈ [2^29, 2^30), u_e ∈ [-29, ...]
-	//   Integer part:   idx = u_m >> (-u_e)      if u_e ≤ 0
-	//   Fractional Q29: frac_Q29 = (u_m << (29 + u_e)) & (2^29 - 1)   if u_e ∈ [-29, 0]
-	//                            = 0                                    if u_e ≤ -30 (u < 1)
-	//                            = full shift left                      if u_e > 0
-
 	SoftFloat u_sf = xi * SoftFloat::from_raw(INV_STEP_M, INV_STEP_E);
 
 	int32_t idx;
 	int32_t frac_Q29;
 
 	{
-		int32_t u_m = u_sf.mantissa; // ∈ [2^29, 2^30), or 0
-		int32_t u_e = u_sf.exponent; // typically -29..-21 for xi ∈ [0, 2π)
+		int32_t u_m = u_sf.mantissa;
+		int32_t u_e = u_sf.exponent;
 
 		if (UNLIKELY(u_m == 0)) {
 			idx      = 0;
 			frac_Q29 = 0;
 		}
+		else if (u_e >= 9) {
+			// u ≥ 2^{29+9}/2^{29} = 2^9 = 512 > 255; but we only have 256 entries.
+			// Saturate. (Should not occur after correct range reduction.)
+			idx      = 255;
+			frac_Q29 = 0;
+		}
+		else if (u_e >= 0) {
+			// u_m in [2^29,2^30), shifted: idx = (u_m << u_e) >> 29, masked to 8 bits
+			idx = static_cast<int32_t>(
+			          (static_cast<int64_t>(u_m) << u_e) >> 29
+				  ) & 0xFF; // ← 0xFF mask (was 0x1FF)
+			frac_Q29 = 0;
+		}
 		else {
-			// Integer part: u_m >> (-u_e) but clipped to [0, 511]
-			// u_e ≥ 0 means u ≥ 2^29 which is way above 512; clamp.
-			if (u_e >= 10) {
-				// u ≥ 2^{29+10} / 2^{29} = 2^10 = 1024 > 511; use 511.
-				idx      = 511;
+			// Normal case: u_e < 0.
+			int rs = -u_e;
+			if (rs > 30) {
+				idx      = 0;
 				frac_Q29 = 0;
 			}
-			else if (u_e >= 0) {
-				// u_m in [2^29,2^30), shifted left by u_e: idx = u_m << u_e >> 29
-				// Maximum u_e here is 9, so u_m << 9 < 2^39; need 64-bit.
-				idx = static_cast<int32_t>(
-				          (static_cast<int64_t>(u_m) << u_e) >> 29
-					  ) & 0x1FF;
-				frac_Q29 = 0; // integer part dominates; fraction lost (u large)
-			}
 			else {
-				// Normal case: u_e < 0.
-				// idx = u_m >> (-u_e - 0) with 29 implicit fractional bits removed:
-				//   u = u_m * 2^{u_e}; integer part = u_m >> (-u_e) [if u_e ≤ -1]
-				//   but u_m already has 29 implicit bits... no, u_m is the actual mantissa.
-				//   u = u_m * 2^{u_e}.
-				//   Integer part of u = u_m >> (-u_e)   if u_e ≤ 0.
-				int rs = -u_e; // right-shift amount ≥ 1
-				if (rs > 30) {
-					idx      = 0;
-					frac_Q29 = 0;
+				idx = (u_m >> rs) & 0xFF; // ← 0xFF mask (was 0x1FF)
+
+				// Fractional part in Q0.29
+				if (rs <= 29) {
+					uint32_t mask = (1u << rs) - 1u;
+					frac_Q29 = static_cast<int32_t>(
+					    (static_cast<uint32_t>(u_m) & mask) << (29 - rs)
+					);
 				}
 				else {
-					idx = (u_m >> rs) & 0x1FF;
-
-					// Fractional part of u as Q0.29:
-					// u_frac = u_m & ((1<<rs)-1), scaled to 2^29.
-					// frac_Q29 = (u_m & mask) << (29 - rs)   if rs ≤ 29
-					//           = (u_m & mask) >> (rs - 29)   if rs > 29
-					if (rs <= 29) {
-						uint32_t mask = (1u << rs) - 1u;
-						frac_Q29 = static_cast<int32_t>(
-						    (static_cast<uint32_t>(u_m) & mask) << (29 - rs)
-						);
-					}
-					else {
-						// rs = 30: one bit of fraction, then zeros
-						uint32_t mask = (1u << rs) - 1u;
-						frac_Q29 = static_cast<int32_t>(
-						    (static_cast<uint32_t>(u_m) & mask) >> (rs - 29)
-						);
-					}
+					// rs == 30
+					uint32_t mask = (1u << rs) - 1u;
+					frac_Q29 = static_cast<int32_t>(
+					    (static_cast<uint32_t>(u_m) & mask) >> (rs - 29)
+					);
 				}
 			}
 		}
 	}
 
-	idx &= 0x1FF; // ensure 0..511
+	idx &= 0xFF; // ← ensure 0..255 (was 0x1FF for 0..511)
 
-	// ── Table lookup ──────────────────────────────────────────────────────
+	// ── Table lookup ───────────────────────────────────────────────────────
+	//
+	// sin(angle) at idx  =>  SF_SIN_MANT[idx],  SF_SIN_EXP[idx]
+	// cos(angle) at idx  =>  SF_SIN_MANT[(idx+64)&0xFF],  SF_SIN_EXP[(idx+64)&0xFF]
+	//                                       ^^^  was (idx+128)&0x1FF
+	//
+	// Rationale: cos(θ) = sin(θ + π/2).
+	//   Table covers [0, 2π) with 256 entries.
+	//   π/2 corresponds to 256/4 = 64 entries.
+	//   So cos at index k  =>  sin at index (k+64) mod 256.
+	//
 	int32_t s_m = SF_SIN_MANT[idx];
 	int32_t s_e = SF_SIN_EXP[idx];
-	int32_t c_m = SF_SIN_MANT[(idx + 128) & 0x1FF];
-	int32_t c_e = SF_SIN_EXP[(idx + 128) & 0x1FF];
+	int32_t c_m = SF_SIN_MANT[(idx + 64) & 0xFF]; // ← +64, mask 0xFF
+	int32_t c_e = SF_SIN_EXP[(idx + 64) & 0xFF];
 
-	// ── Fixed-point derivative correction ────────────────────────────────
+	// ── Fixed-point derivative correction ─────────────────────────────────
 	//
-	// sin(x0 + δ) ≈ sin(x0) + cos(x0)·δ
-	// cos(x0 + δ) ≈ cos(x0) − sin(x0)·δ
+	// Identical derivation to 512-entry version:
+	//   sin(x0 + δ) ≈ sin(x0) + cos(x0)·δ
+	//   cos(x0 + δ) ≈ cos(x0) − sin(x0)·δ
+	//   δ = frac_Q29 * 2^{-29} * h
 	//
-	// δ = frac_Q29 * 2^{-29} * h
-	//   = frac_Q29 * H_MANT * 2^{H_EXP - 29}
+	// make_corr logic is UNCHANGED — only H_MANT/H_EXP differ.
+	// corr_e = base_e + H_EXP + 29
+	//   With H_EXP = -35:  corr_e = base_e + (-35) + 29 = base_e - 6
+	//   With H_EXP = -36 (old):  corr_e = base_e - 7
+	//   The correction is now ~2× larger in magnitude, as expected for 2× step.
 	//
-	// cos0·δ = c_m * frac_Q29 * H_MANT * 2^{c_e + H_EXP - 29}
-	//
-	// Two-step integer computation:
-	//
-	//   Step 1:  adj    = (c_m * frac_Q29) >> 29
-	//              represents c_m * (frac_Q29 / 2^29) as a 30-bit integer.
-	//   Step 2:  corr_m = (adj  * H_MANT ) >> 29
-	//              represents adj * (H_MANT / 2^29).
-	//
-	// The two right-shifts together absorb 58 bits of implicit scale.
-	// For the VALUE equation to hold:
-	//
-	//   corr_m * 2^{corr_e} = c_m * 2^{c_e}  *  frac_Q29 * 2^{-29}  *  H_MANT * 2^{H_EXP}
-	//
-	// Since corr_m ≈ (c_m * frac_Q29 * H_MANT) / 2^58, we need:
-	//
-	//   corr_m * 2^{corr_e} = corr_m * 2^{58}  *  2^{c_e - 29 + H_EXP}
-	//   ⟹  corr_e = c_e + H_EXP - 29 + 58 = c_e + H_EXP + 29
-	//
-	// The +29 term is CRITICAL — it accounts for the 58 bits consumed by the
-	// two >> 29 shifts, offset by the 29 bits already encoded in H_EXP's
-	// Q-format meaning.  Omitting it makes the correction ~2^{-29} ≈ 10^{-9}
-	// times too small, effectively disabling interpolation entirely.
-
 	auto make_corr = [&](int32_t base_m,
 		int32_t base_e,
-		bool negate) -> SoftFloat
+		bool    negate) -> SoftFloat
 	{
 		if (UNLIKELY(frac_Q29 == 0 || base_m == 0)) return SoftFloat::zero();
 
-		// Step 1: adj = base_m * frac_Q29 / 2^29
-		int64_t p1   = static_cast<int64_t>(base_m) * static_cast<int64_t>(frac_Q29);
-		int32_t adj  = static_cast<int32_t>(p1 >> 29); // ∈ (-2^30, 2^30)
+		// Step 1: adj = base_m * (frac_Q29 / 2^29)
+		int64_t p1  = static_cast<int64_t>(base_m) * static_cast<int64_t>(frac_Q29);
+		int32_t adj = static_cast<int32_t>(p1 >> 29);
 
 		if (UNLIKELY(adj == 0)) return SoftFloat::zero();
 
-		// Step 2: corr = adj * H_MANT / 2^29
+		// Step 2: corr = adj * (H_MANT / 2^29)
 		int64_t p2     = static_cast<int64_t>(adj) * static_cast<int64_t>(H_MANT);
-		int32_t corr_m = static_cast<int32_t>(p2 >> 29); // ∈ (-2^30, 2^30)
+		int32_t corr_m = static_cast<int32_t>(p2 >> 29);
 
-		// ── BUGFIX: corr_e = base_e + H_EXP + 29 ─────────────────────────
-		// The two >> 29 shifts consume 58 bits of implicit scale.
-		// H_EXP already accounts for 29 of those bits (via the Q0.29 format
-		// of frac_Q29), so the remaining 29 must be added explicitly here.
-		// The original code wrote `base_e + H_EXP`, which is 29 too small,
-		// making every correction ≈ 2^{-29} ≈ 10^{-9} of its correct value.
-		int32_t corr_e = base_e + H_EXP + 29;
+		// corr_e accounts for the two >> 29 shifts and H's Q-format:
+		//   corr_e = base_e + H_EXP + 29
+		// (H_EXP = -35 for 256-entry, was -36 for 512-entry)
+		int32_t corr_e = base_e + H_EXP + 29; // = base_e - 6  (was base_e - 7)
 
 		if (UNLIKELY(corr_m == 0)) return SoftFloat::zero();
 		if (negate) corr_m = -corr_m;
 
-		// Normalise corr_m to [2^29, 2^30) with correct sign.
+		// Normalise corr to [2^29, 2^30)
 		uint32_t abs_c = sf_abs32(corr_m);
 		if (abs_c >= 0x40000000u) {
-			// bit30 set → overflow by 1
-			corr_m >>= 1; // arithmetic: preserves sign
+			corr_m >>= 1;
 			corr_e  += 1;
 		}
 		else if (abs_c < 0x20000000u && abs_c != 0) {
-			// underflow: left-shift needed (rare, only when frac_Q29 is tiny)
 			int lz  = sf_clz(abs_c);
 			int sh  = lz - 2;
-			int32_t sign = corr_m >> 31;
-			uint32_t a   = (static_cast<uint32_t>(corr_m) ^ static_cast<uint32_t>(sign))
-			               - static_cast<uint32_t>(sign);
-			a     <<= sh;
-			corr_e -= sh;
-			corr_m  = static_cast<int32_t>((a ^ static_cast<uint32_t>(sign))
-			                               - static_cast<uint32_t>(sign));
+			int32_t  sign = corr_m >> 31;
+			uint32_t a    = (static_cast<uint32_t>(corr_m) ^ static_cast<uint32_t>(sign))
+			                - static_cast<uint32_t>(sign);
+			a      <<= sh;
+			corr_e  -= sh;
+			corr_m   = static_cast<int32_t>(
+			               (a ^ static_cast<uint32_t>(sign))
+			               - static_cast<uint32_t>(sign));
 		}
 
 		return SoftFloat::from_raw(corr_m, corr_e);
 	};
 
-	// ── Build sin_corr and cos_corr ───────────────────────────────────────
+	// ── Build corrections ──────────────────────────────────────────────────
 	SoftFloat sin_corr = make_corr(c_m, c_e, /*negate=*/false); // +cos0·δ
-	SoftFloat cos_corr = make_corr(s_m, s_e, /*negate=*/true); // -sin0·δ
+	SoftFloat cos_corr = make_corr(s_m, s_e, /*negate=*/true); // −sin0·δ
 
-	// ── Combine table value + correction ─────────────────────────────────
+	// ── Combine table value + correction ──────────────────────────────────
 	SoftFloat sin_base = SoftFloat::from_raw(s_m, s_e);
 	SoftFloat cos_base = SoftFloat::from_raw(c_m, c_e);
 
-	// Standard SoftFloat addition handles alignment automatically.
 	SoftFloat sin_val = sin_base + sin_corr;
 	SoftFloat cos_val = cos_base + cos_corr;
 
 	return { sin_val, cos_val };
 }
 
-#else
-// Internal: do range reduction once, return {sin(x), cos(x)} from same table slot.
-constexpr SF_HOT SoftFloatPair sf_sincos(SoftFloat x) noexcept {
-	constexpr SoftFloat inv_two_pi = SoftFloat::from_raw(683565276, -32);
-	constexpr SoftFloat two_pi_c = SoftFloat::two_pi();
-	constexpr SoftFloat step = SoftFloat::from_raw(843314857, -36);
-	constexpr SoftFloat inv_step = SoftFloat::from_raw(683565276, -23);
-
-	// Range reduction (same as sin(), done once)
-	SoftFloat xi = x;
-	int32_t ki = (xi * inv_two_pi).to_int32();
-	if (ki) xi -= two_pi_c * SoftFloat(ki);
-	if (xi.mantissa < 0) xi += two_pi_c;
-	if (!(xi < two_pi_c)) xi -= two_pi_c;
-
-	SoftFloat u = xi * inv_step;
-	int32_t   idx = u.to_int32() & 0x1FF;
-	SoftFloat x0 = SoftFloat(idx) * step;
-	SoftFloat frac = xi - x0;
-
-	SoftFloat sin0 = SoftFloat::from_raw(SF_SIN_MANT[idx], SF_SIN_EXP[idx]);
-	SoftFloat cos0 = SoftFloat::from_raw(SF_SIN_MANT[(idx + 128) & 0x1FF], SF_SIN_EXP[(idx + 128) & 0x1FF]);
-
-	// sin(x) ≈ sin0 + cos0*frac
-	// cos(x) ≈ cos0 − sin0*frac  (derivative of cosine)
-	return {
-		fused_mul_add(sin0,  cos0, frac),
-		fused_mul_add(cos0, -sin0, frac)
-	};
-}
-#endif
-
 constexpr SoftFloat SoftFloat::tan() const noexcept {
-	auto [s, c] = sf_sincos(*this);
+	auto[s, c] = sf_sincos(*this);
 	if (c.is_zero())
 		return from_raw(s.mantissa >= 0 ? (1 << 29) : -(1 << 29), 127);
 	return s / c;
@@ -1999,7 +1758,6 @@ constexpr SoftFloat SoftFloat::cos() const noexcept {
 constexpr SoftFloatPair SoftFloat::sincos() const noexcept {
 	return sf_sincos(*this);
 }
-
 #endif
 
 // asin(x) – polynomial approximation for |x| <= 1
@@ -2396,37 +2154,43 @@ constexpr SF_HOT SoftFloat atan2(SoftFloat y, SoftFloat x) noexcept {
 						// Rewrite as: q1 = num_hi / (den >> 16) (approx), then correct.
 						// This is exactly Knuth's hat-q: q1_hat = floor((num_hi*B + u1) / den)
 						// using the leading digits.
-						uint32_t q1, rhat;
+						uint32_t q1, rhat1;
 						__asm__ volatile(
 						    "udiv %0, %1, %2\n\t"
 						    : "=r"(q1) : "r"(num_hi),
 							"r"(vn1));
-						rhat = num_hi - q1 * vn1;
+						rhat1 = num_hi - q1 * vn1;
 
-						// Correction loop (at most 2 iterations)
-						while (q1 >= 0x10000u ||
-						       (uint64_t)q1 * vn0 > ((uint64_t)rhat << 16) + u1) {
-							--q1;
-							rhat += vn1;
-							if (rhat >= 0x10000u) break;
+						// Correction: rhat < 0x10000u guard omitted.
+						// vn1 < 2^14 => after one correction rhat1 < 2*vn1 < 2^15,
+						// so rhat1 < 0x10000u is always true — the guard is vacuous.
+						if (q1 >= 0x10000u ||
+						    (uint64_t)q1 * vn0 > ((uint64_t)rhat1 << 16) + u1) {
+							--q1; rhat1 += vn1;
+							if (q1 >= 0x10000u ||
+							    (uint64_t)q1 * vn0 > ((uint64_t)rhat1 << 16) + u1) {
+								--q1;
+							}
 						}
 
 						uint32_t un21 = (num_hi - q1 * vn1) * 0x10000u + u1
 						                - q1 * vn0;
 
 						// ── Low digit ───────────────────────────────────────
-						uint32_t q0;
+						uint32_t q0, rhat0;
 						__asm__ volatile(
 						    "udiv %0, %1, %2\n\t"
 						    : "=r"(q0) : "r"(un21),
 							"r"(vn1));
-						rhat = un21 - q0 * vn1;
+						rhat0 = un21 - q0 * vn1;
 
-						while (q0 >= 0x10000u ||
-						       (uint64_t)q0 * vn0 > ((uint64_t)rhat << 16) + u0) {
-							--q0;
-							rhat += vn1;
-							if (rhat >= 0x10000u) break;
+						if (q0 >= 0x10000u ||
+                        (uint64_t)q0 * vn0 > ((uint64_t)rhat0 << 16) + u0) {
+							--q0; rhat0 += vn1;
+							if (q0 >= 0x10000u ||
+							    (uint64_t)q0 * vn0 > ((uint64_t)rhat0 << 16) + u0) {
+								--q0;
+							}
 						}
 
 						uint64_t q_full = ((uint64_t)q1 << 16) | q0;
