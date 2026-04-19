@@ -1713,34 +1713,31 @@ static constexpr int8_t SF_SIN_EXP[257] = {
 	0,
 };
 
-// =========================================================================
-// sf_sincos — 256-entry table, linear interpolation
-//
-// =========================================================================
 [[nodiscard]] constexpr SF_HOT SoftFloatPair sf_sincos(SoftFloat x) noexcept {
 
-	// inv_two_pi = 1/(2π) ≈ 0.1591549431	
+	// ── Constants ─────────────────────────────────────────────────────────────
+	// inv_two_pi = 1/(2π) ≈ 0.15915494
 	constexpr int32_t INV_2PI_M  = 683565276;
 	constexpr int32_t INV_2PI_E  = -32;
 
-	// two_pi = 2π ≈ 6.2831853072
+	// two_pi = 2π ≈ 6.28318531
 	constexpr int32_t TWO_PI_M   = 843314857;
 	constexpr int32_t TWO_PI_E   = -27;
 
-	// inv_step = 256/(2π) = 128/π ≈ 40.7436654315
+	// inv_step = 256/(2π) = 128/π ≈ 40.74366543
 	constexpr int32_t INV_STEP_M = 683565276; // same mantissa as INV_2PI
-	constexpr int32_t INV_STEP_E = -24; 
+	constexpr int32_t INV_STEP_E = -24;
 
-	// h = 2π/256 = π/128 ≈ 0.0245436926
+	// h = 2π/256 = π/128 ≈ 0.02454369
 	constexpr int32_t H_MANT     = 843314857; // same mantissa as π
-	constexpr int32_t H_EXP      = -35; 
+	constexpr int32_t H_EXP      = -35;
 
-	// ── Handle zero ────────────────────────────────────────────────────────
+	// ── Handle zero ───────────────────────────────────────────────────────────
 	if (UNLIKELY(x.mantissa == 0)) {
 		return { SoftFloat::zero(), SoftFloat::one() };
 	}
 
-	// ── Range reduction: x → [0, 2π) ──────────────────────────────────────
+	// ── Range reduction: x → [0, 2π) ─────────────────────────────────────────
 	SoftFloat xi = x;
 	{
 		int32_t ki = (x * SoftFloat::from_raw(INV_2PI_M, INV_2PI_E)).to_int32();
@@ -1748,20 +1745,15 @@ static constexpr int8_t SF_SIN_EXP[257] = {
 			xi = x - SoftFloat(ki) * SoftFloat::from_raw(TWO_PI_M, TWO_PI_E);
 		}
 		SoftFloat two_pi = SoftFloat::from_raw(TWO_PI_M, TWO_PI_E);
-		if (xi.mantissa < 0)   xi = xi + two_pi;
-		if (!(xi < two_pi))    xi = xi - two_pi;
+		if (xi.mantissa < 0)    xi = xi + two_pi;
+		if (!(xi < two_pi))     xi = xi - two_pi;
 	}
 
-	// ── Map reduced angle to table index + fixed-point fraction ───────────
+	// ── Map reduced angle to table index + fixed-point fraction ──────────────
 	//
 	// u = xi * inv_step   (u ∈ [0, 256))
-	// idx      = floor(u) & 0xFF    ← 8-bit index, was 9-bit (0x1FF)
-	// frac_Q29 = fractional part of u in Q0.29 format ∈ [0, 2^29)
-	//
-	// Extraction logic is identical to the 512-entry version except:
-	//   - mask is 0xFF  instead of 0x1FF
-	//   - u_e threshold for "u ≥ table size" is 8 instead of 9
-	//     (2^{29+8}/2^{29} = 2^8 = 256)
+	// idx      = floor(u) & 0xFF       — 8-bit table index
+	// frac_Q29 = fractional part of u  — Q0.29 ∈ [0, 2^29)
 	//
 	SoftFloat u_sf = xi * SoftFloat::from_raw(INV_STEP_M, INV_STEP_E);
 
@@ -1777,38 +1769,38 @@ static constexpr int8_t SF_SIN_EXP[257] = {
 			frac_Q29 = 0;
 		}
 		else if (u_e >= 9) {
-			// u ≥ 2^{29+9}/2^{29} = 2^9 = 512 > 255; but we only have 256 entries.
-			// Saturate. (Should not occur after correct range reduction.)
+			// u ≥ 2^{29+9}/2^{29} = 512 > 255: saturate
 			idx      = 255;
 			frac_Q29 = 0;
 		}
 		else if (u_e >= 0) {
-			// u_m in [2^29,2^30), shifted: idx = (u_m << u_e) >> 29, masked to 8 bits
+			// u is large (≥ 2^29 in mantissa units): integer portion only
 			idx = static_cast<int32_t>(
 			          (static_cast<int64_t>(u_m) << u_e) >> 29
-				  ) & 0xFF; // ← 0xFF mask (was 0x1FF)
+				  ) & 0xFF;
 			frac_Q29 = 0;
 		}
 		else {
-			// Normal case: u_e < 0.
-			int rs = -u_e;
+			// Normal case: u_e < 0
+			int rs = -u_e; // right-shift needed to extract integer part
 			if (rs > 30) {
+				// u < 0.5: both idx and frac are negligible at Q29 resolution
 				idx      = 0;
 				frac_Q29 = 0;
 			}
 			else {
-				idx = (u_m >> rs) & 0xFF; // ← 0xFF mask (was 0x1FF)
+				idx = (static_cast<uint32_t>(u_m) >> rs) & 0xFF;
 
-				// Fractional part in Q0.29
 				if (rs <= 29) {
+					// Extract lower rs bits and scale to Q0.29
 					uint32_t mask = (1u << rs) - 1u;
 					frac_Q29 = static_cast<int32_t>(
 					    (static_cast<uint32_t>(u_m) & mask) << (29 - rs)
 					);
 				}
 				else {
-					// rs == 30
-					uint32_t mask = (1u << rs) - 1u;
+					// rs == 30: right-shift to stay within int32_t
+					uint32_t mask = (1u << rs) - 1u; // 0x3FFFFFFF
 					frac_Q29 = static_cast<int32_t>(
 					    (static_cast<uint32_t>(u_m) & mask) >> (rs - 29)
 					);
@@ -1817,73 +1809,82 @@ static constexpr int8_t SF_SIN_EXP[257] = {
 		}
 	}
 
-	idx &= 0xFF; // ← ensure 0..255 (was 0x1FF for 0..511)
+	idx &= 0xFF; // guarantee 0..255
 
-	// ── Table lookup ───────────────────────────────────────────────────────
+	// ── Table lookup ──────────────────────────────────────────────────────────
 	//
-	// sin(angle) at idx  =>  SF_SIN_MANT[idx],  SF_SIN_EXP[idx]
-	// cos(angle) at idx  =>  SF_SIN_MANT[(idx+64)&0xFF],  SF_SIN_EXP[(idx+64)&0xFF]
-	//                                       ^^^  was (idx+128)&0x1FF
+	// sin at idx  → SF_SIN_MANT[idx],         SF_SIN_EXP[idx]
+	// cos at idx  → SF_SIN_MANT[(idx+64)&0xFF], SF_SIN_EXP[(idx+64)&0xFF]
 	//
-	// Rationale: cos(θ) = sin(θ + π/2).
-	//   Table covers [0, 2π) with 256 entries.
-	//   π/2 corresponds to 256/4 = 64 entries.
-	//   So cos at index k  =>  sin at index (k+64) mod 256.
+	// cos(θ) = sin(θ + π/2).  π/2 corresponds to 256/4 = 64 table entries.
 	//
 	int32_t s_m = SF_SIN_MANT[idx];
 	int32_t s_e = SF_SIN_EXP[idx];
-	int32_t c_m = SF_SIN_MANT[(idx + 64) & 0xFF]; // ← +64, mask 0xFF
+	int32_t c_m = SF_SIN_MANT[(idx + 64) & 0xFF];
 	int32_t c_e = SF_SIN_EXP[(idx + 64) & 0xFF];
 
-	// ── Fixed-point derivative correction ─────────────────────────────────
+	// ── Hoist the common frac_Q29 × H_MANT product ───────────────────────────
 	//
-	// Identical derivation to 512-entry version:
-	//   sin(x0 + δ) ≈ sin(x0) + cos(x0)·δ
-	//   cos(x0 + δ) ≈ cos(x0) − sin(x0)·δ
-	//   δ = frac_Q29 * 2^{-29} * h
+	// Original make_corr() did, per call:
+	//   adj    = base_m × frac_Q29 >> 29    [SMULL #1]
+	//   corr_m = adj    × H_MANT   >> 29    [SMULL #2]
 	//
-	// make_corr logic is UNCHANGED — only H_MANT/H_EXP differ.
-	// corr_e = base_e + H_EXP + 29
-	//   With H_EXP = -35:  corr_e = base_e + (-35) + 29 = base_e - 6
-	//   With H_EXP = -36 (old):  corr_e = base_e - 7
-	//   The correction is now ~2× larger in magnitude, as expected for 2× step.
+	// With two calls (sin + cos) that is 4 SMLLs.
+	//
+	// Rewrite by factoring out the invariant:
+	//
+	//   frac_H_Q29 = (frac_Q29 × H_MANT) >> 29          [1 SMULL — done once]
+	//   corr_m     = (base_m   × frac_H_Q29) >> 29       [1 SMULL — per call]
+	//
+	// Result: 3 SMLLs total.  The intermediate rounding shift of adj moves
+	// from the first chain to the pre-computation; max error is ≤ 1 ULP in
+	// the final corr_m, negligible vs. the ~step/2 interpolation error.
+	//
+	int32_t frac_H_Q29 = 0;
+	if (LIKELY(frac_Q29 != 0)) {
+		// frac_Q29 ∈ [1, 2^29), H_MANT ≈ 843 M; product fits in int64_t.
+		int64_t ph = static_cast<int64_t>(frac_Q29) * static_cast<int64_t>(H_MANT);
+		frac_H_Q29 = static_cast<int32_t>(ph >> 29);
+		// frac_H_Q29 > 0 always when frac_Q29 > 0 (H_MANT > 2^29).
+	}
+
+	// ── Fixed-point derivative correction (simplified lambda) ─────────────────
+	//
+	//   sin(x0 + δ) ≈ sin(x0) + cos(x0)·δ     → sin_corr  = +cos0 × δ
+	//   cos(x0 + δ) ≈ cos(x0) − sin(x0)·δ     → cos_corr  = −sin0 × δ
+	//   δ = (frac_Q29 / 2^29) × h              → absorbed into frac_H_Q29
+	//
+	// corr_e = base_e + H_EXP + 29  (H_EXP = -35 → base_e - 6)
 	//
 	auto make_corr = [&](int32_t base_m,
 		int32_t base_e,
 		bool    negate) -> SoftFloat
 	{
-		if (UNLIKELY(frac_Q29 == 0 || base_m == 0)) return SoftFloat::zero();
+		if (UNLIKELY(frac_H_Q29 == 0 || base_m == 0)) return SoftFloat::zero();
 
-		// Step 1: adj = base_m * (frac_Q29 / 2^29)
-		int64_t p1  = static_cast<int64_t>(base_m) * static_cast<int64_t>(frac_Q29);
-		int32_t adj = static_cast<int32_t>(p1 >> 29);
+		// One SMULL (down from two in the original):
+		//   corr ≡ base × frac × H / 2^58  (same as before, 1-ULP rounding delta)
+		int64_t p      = static_cast<int64_t>(base_m)
+		               * static_cast<int64_t>(frac_H_Q29);
+		int32_t corr_m = static_cast<int32_t>(p >> 29);
 
-		if (UNLIKELY(adj == 0)) return SoftFloat::zero();
-
-		// Step 2: corr = adj * (H_MANT / 2^29)
-		int64_t p2     = static_cast<int64_t>(adj) * static_cast<int64_t>(H_MANT);
-		int32_t corr_m = static_cast<int32_t>(p2 >> 29);
-
-		// corr_e accounts for the two >> 29 shifts and H's Q-format:
-		//   corr_e = base_e + H_EXP + 29
-		// (H_EXP = -35 for 256-entry, was -36 for 512-entry)
-		int32_t corr_e = base_e + H_EXP + 29; // = base_e - 6  (was base_e - 7)
+		int32_t corr_e = base_e + H_EXP + 29; // = base_e - 6
 
 		if (UNLIKELY(corr_m == 0)) return SoftFloat::zero();
 		if (negate) corr_m = -corr_m;
 
-		// Normalise corr to [2^29, 2^30)
+		// Normalise corr_m to [2^29, 2^30)
 		uint32_t abs_c = sf_abs32(corr_m);
 		if (abs_c >= 0x40000000u) {
 			corr_m >>= 1;
 			corr_e  += 1;
 		}
 		else if (abs_c < 0x20000000u && abs_c != 0) {
-			int lz  = sf_clz(abs_c);
-			int sh  = lz - 2;
+			int      lz   = sf_clz(abs_c);
+			int      sh   = lz - 2;
 			int32_t  sign = corr_m >> 31;
 			uint32_t a    = (static_cast<uint32_t>(corr_m) ^ static_cast<uint32_t>(sign))
-			                - static_cast<uint32_t>(sign);
+			              - static_cast<uint32_t>(sign);
 			a      <<= sh;
 			corr_e  -= sh;
 			corr_m   = static_cast<int32_t>(
@@ -1894,11 +1895,11 @@ static constexpr int8_t SF_SIN_EXP[257] = {
 		return SoftFloat::from_raw(corr_m, corr_e);
 	};
 
-	// ── Build corrections ──────────────────────────────────────────────────
+	// ── Build corrections ─────────────────────────────────────────────────────
 	SoftFloat sin_corr = make_corr(c_m, c_e, /*negate=*/false); // +cos0·δ
 	SoftFloat cos_corr = make_corr(s_m, s_e, /*negate=*/true); // −sin0·δ
 
-	// ── Combine table value + correction ──────────────────────────────────
+	// ── Combine table value + correction ─────────────────────────────────────
 	SoftFloat sin_base = SoftFloat::from_raw(s_m, s_e);
 	SoftFloat cos_base = SoftFloat::from_raw(c_m, c_e);
 
@@ -2801,56 +2802,157 @@ static constexpr int32_t EXP_MANT[257] = {
 	0x20000000
 };
 
-static constexpr int8_t EXP_EXP[257] = {
-	-29, -29, -29, -29, -29, -29, -29, -29, -29, -29, -29, -29, -29, -29, -29, -29,
-	-29, -29, -29, -29, -29, -29, -29, -29, -29, -29, -29, -29, -29, -29, -29, -29,
-	-29, -29, -29, -29, -29, -29, -29, -29, -29, -29, -29, -29, -29, -29, -29, -29,
-	-29, -29, -29, -29, -29, -29, -29, -29, -29, -29, -29, -29, -29, -29, -29, -29,
-	-29, -29, -29, -29, -29, -29, -29, -29, -29, -29, -29, -29, -29, -29, -29, -29,
-	-29, -29, -29, -29, -29, -29, -29, -29, -29, -29, -29, -29, -29, -29, -29, -29,
-	-29, -29, -29, -29, -29, -29, -29, -29, -29, -29, -29, -29, -29, -29, -29, -29,
-	-29, -29, -29, -29, -29, -29, -29, -29, -29, -29, -29, -29, -29, -29, -29, -29,
-	-29, -29, -29, -29, -29, -29, -29, -29, -29, -29, -29, -29, -29, -29, -29, -29,
-	-29, -29, -29, -29, -29, -29, -29, -29, -29, -29, -29, -29, -29, -29, -29, -29,
-	-29, -29, -29, -29, -29, -29, -29, -29, -29, -29, -29, -29, -29, -29, -29, -29,
-	-29, -29, -29, -29, -29, -29, -29, -29, -29, -29, -29, -29, -29, -29, -29, -29,
-	-29, -29, -29, -29, -29, -29, -29, -29, -29, -29, -29, -29, -29, -29, -29, -29,
-	-29, -29, -29, -29, -29, -29, -29, -29, -29, -29, -29, -29, -29, -29, -29, -29,
-	-29, -29, -29, -29, -29, -29, -29, -29, -29, -29, -29, -29, -29, -29, -29, -29,
-	-29, -29, -29, -29, -29, -29, -29, -29, -29, -29, -29, -29, -29, -29, -29, -29,
-	-28
-};
-
-
 constexpr SF_HOT SoftFloat SoftFloat::exp() const noexcept {
 	SoftFloat x = *this;
 	if (x.mantissa == 0) return SoftFloat::one();
 
-	constexpr SoftFloat LN2 = SoftFloat::from_raw(0x2C5C85FE, -30); // ln(2)
+	constexpr SoftFloat LN2     = SoftFloat::from_raw(0x2C5C85FE, -30); // ln(2)
 	constexpr SoftFloat INV_LN2 = SoftFloat::from_raw(0x2E2B8A3E, -29); // 1/ln(2)
 
-	// Range reduction: x = k*ln2 + f, with f in [0, ln2)
+	// ── Range reduction: x = k·ln2 + f,  f ∈ [0, ln2) ───────────────────────
 	int32_t k = (x * INV_LN2).to_int32();
 	SoftFloat f = x - SoftFloat(k) * LN2;
-	if (f.is_negative()) { f = f + LN2; k -= 1; }
-	else if (!(f < LN2)) { f = f - LN2; k += 1; }
+	if (f.is_negative())  { f = f + LN2; k -= 1; }
+	else if (!(f < LN2))  { f = f - LN2; k += 1; }
 
-	// f is in [0, ln2). Scale to table index: idx = f * (256 / ln2)
+	// ── Scale f to table position ─────────────────────────────────────────────
+	//
+	// idx_f = f × (256/ln2)  ∈ [0, 256)
+	// The SoftFloat result has mantissa u_m ∈ [2^29, 2^30) and exponent u_e.
+	// For valid inputs, u_e is always negative (idx_f < 256 < 2^29).
+	//
 	constexpr SoftFloat SCALE = SoftFloat::from_raw(0x2E2B8A3E, -21); // 256/ln2
 	SoftFloat idx_f = f * SCALE;
-	int32_t idx = idx_f.to_int32();
-	if (idx > 255) idx = 255;
-	if (idx < 0)   idx = 0;
 
-	SoftFloat frac = idx_f - SoftFloat(idx);
+	// ── Fixed-point index + fraction extraction ───────────────────────────────
+	//
+	// Let rs = -u_e  (positive since u_e < 0).
+	//
+	// For rs ∈ [22, 29]  (idx_f ∈ [1, 256)):
+	//   idx      = (u_m >> rs) & 0xFF            — integer part, 0..255
+	//   frac_Q29 = (u_m & ((1<<rs)-1)) << (29-rs) — fractional part in Q0.29
+	//
+	// For rs == 30  (idx_f ∈ [0.5, 1)):
+	//   idx = 0,  frac_Q29 = u_m >> 1
+	//
+	// For rs > 30  (idx_f < 0.5):
+	//   idx = 0,  frac_Q29 = u_m >> (rs-29)   (tiny; may round to 0)
+	//
+	// For rs < 22  (idx_f ≥ 256): saturate — not reachable for valid f.
+	//
+	int32_t idx;
+	int32_t frac_Q29;
 
-	SoftFloat v0 = SoftFloat::from_raw(EXP_MANT[idx], EXP_EXP[idx]);
-	SoftFloat v1 = SoftFloat::from_raw(EXP_MANT[idx + 1], EXP_EXP[idx + 1]);
+	{
+		int32_t u_m = idx_f.mantissa;
+		int32_t u_e = idx_f.exponent;
 
-	SoftFloat e_f = v0 + frac * (v1 - v0);
+		if (UNLIKELY(u_m == 0)) {
+			idx = 0; frac_Q29 = 0;
+		}
+		else if (UNLIKELY(u_e >= 0)) {
+			// idx_f ≥ 2^29: impossible for valid f ∈ [0, ln2), guard anyway
+			idx = 255; frac_Q29 = 0;
+		}
+		else {
+			int      rs = -u_e; // 22..~60 in practice
+			uint32_t um = static_cast<uint32_t>(u_m); // [2^29, 2^30)
 
-	// Multiply by 2^k: adjust exponent by k
-	return e_f << k;
+			if (UNLIKELY(rs < 22)) {
+				// idx_f ≥ 256: saturate (defensive; won't fire for valid input)
+				idx = 255; frac_Q29 = 0;
+			}
+			else if (rs <= 29) {
+				// Normal path: rs ∈ [22..29]
+				// um >> rs ∈ [0, 2^{30-rs}) ⊆ [0, 256) since rs ≥ 22.
+				idx = static_cast<int32_t>(um >> rs);
+				if (UNLIKELY(idx > 255)) idx = 255; // safety clamp
+
+				uint32_t mask = (1u << rs) - 1u; // lower rs bits
+				frac_Q29 = static_cast<int32_t>(
+				    (um & mask) << (29 - rs)             // scale to Q0.29
+				);
+			}
+			else if (rs == 30) {
+				// idx_f ∈ [0.5, 1): integer part = 0
+				idx = 0;
+				// All 30 low bits of um are the fraction; scale to Q0.29 via >>1
+				frac_Q29 = static_cast<int32_t>(um >> 1);
+			}
+			else {
+				// rs > 30: idx_f < 0.5; idx = 0, tiny frac
+				idx = 0;
+				// Shift right by (rs-29) to land in Q0.29; clamp on huge rs.
+				frac_Q29 = (rs < 60)
+				    ? static_cast<int32_t>(um >> (rs - 29))
+				    : 0;
+			}
+		}
+	}
+
+	// ── Fixed-point interpolation in EXP_MANT[] ──────────────────────────────
+	//
+	// Key property: EXP_EXP[0..255] == -29 (uniform exponent).
+	//   EXP_EXP[256] == -28  (only the sentinel entry differs).
+	//
+	// For idx ∈ [0, 254]:
+	//   m0, m1 ∈ [2^29, 2^30), both at exp -29.
+	//   delta = m1 - m0 > 0 (monotone increasing table), fits int32_t.
+	//   corr  = (delta × frac_Q29) >> 29  — needs int64_t intermediate.
+	//   result_m = m0 + corr  ∈ [m0, m1) ⊂ [2^29, 2^30): already normalised.
+	//
+	// For idx == 255:
+	//   m0 at exp -29, m1 conceptually at exp -29 too but its raw storage
+	//   is EXP_MANT[256]=0x20000000 at EXP_EXP[256]=-28, which equals
+	//   0x40000000 in the -29 encoding.  Handle the overflow case explicitly.
+	//
+	int32_t result_m;
+	int32_t result_e = -29;
+
+	{
+		int32_t m0 = EXP_MANT[idx];
+
+		if (LIKELY(idx < 255)) {
+			// Both entries at exp -29: pure integer interpolation.
+			int32_t m1    = EXP_MANT[idx + 1];
+			int32_t delta = m1 - m0; // ∈ (0, ~2^21]: table monotone
+
+			// delta × frac_Q29 ≤ ~2^21 × 2^29 = 2^50: must use int64_t.
+			int32_t corr = static_cast<int32_t>(
+			    (static_cast<int64_t>(delta) * static_cast<int64_t>(frac_Q29)) >> 29
+			);
+			result_m = m0 + corr; // stays in [m0, m1) ⊂ [2^29, 2^30)
+			// result_e stays at -29; no renormalisation needed.
+		}
+		else {
+			// idx == 255: interpolate toward EXP_MANT[256] at exp -28.
+			//
+			// EXP_MANT[256] = 0x20000000 represents 2.0 (= e^ln2).
+			// In exp-29 units: 2.0 * 2^29 = 2^30 = 0x40000000.
+			//
+			// delta = 0x40000000 - m0  (positive, fits int32_t: m0 < 0x40000000)
+			constexpr int32_t M1_AT_NEG29 = static_cast<int32_t>(0x40000000u);
+			int32_t delta = M1_AT_NEG29 - m0;
+
+			int32_t corr = static_cast<int32_t>(
+			    (static_cast<int64_t>(delta) * static_cast<int64_t>(frac_Q29)) >> 29
+			);
+			int32_t rm = m0 + corr; // ∈ [m0, 0x40000000]
+
+			// If rm reached or exceeded 2^30, step exponent up to -28.
+			if (static_cast<uint32_t>(rm) >= 0x40000000u) {
+				result_m = rm >> 1; // 0x20000000: normalised at exp -28
+				result_e = -28;
+			}
+			else {
+				result_m = rm;
+				// result_e stays at -29
+			}
+		}
+	}
+
+	// ── Scale by 2^k (adjust exponent only — O(1)) ───────────────────────────
+	return SoftFloat::from_raw(result_m, result_e) << k;
 }
 
 static constexpr int32_t LOG2_MANT[257] = {
@@ -2939,6 +3041,30 @@ constexpr SoftFloat SoftFloat::log10() const noexcept {
 	return log2() * LOG10_2;
 }
 
+#if 1
+constexpr SoftFloat SoftFloat::pow(SoftFloat y) const noexcept {
+	if (mantissa == 0) return y.mantissa == 0 ? one() : zero();
+	if (y.mantissa == 0) return one();
+
+	// Fast path: integer exponent
+	if (y == y.trunc()) {
+		int32_t n = y.to_int32();
+		if (n >= 0) {
+			SoftFloat result = one(), base = *this;
+			for (uint32_t un = static_cast<uint32_t>(n); un; un >>= 1) {
+				if (un & 1) result = SoftFloat(result * base);
+				base = SoftFloat(base * base);
+			}
+			return result;
+		}
+		// negative integer: base^(-n) = 1 / base^n
+		return one() / pow(-y);
+	}
+
+	if (is_negative()) return zero(); // non-integer power of negative
+	return (y * log()).exp();
+}
+#else
 // pow(x, y) = exp(y * log(x))
 constexpr SoftFloat SoftFloat::pow(SoftFloat y) const noexcept {
 	if (mantissa == 0) {
@@ -2950,6 +3076,7 @@ constexpr SoftFloat SoftFloat::pow(SoftFloat y) const noexcept {
 	if (is_negative() && (y != y.trunc())) return SoftFloat::zero();
 	return (y * log()).exp();
 }
+#endif
 
 #if 0
 constexpr SF_HOT SoftFloat hypot(SoftFloat x, SoftFloat y) noexcept {
