@@ -1,7 +1,0 @@
-C:/Projects/DTC-SPM/WheelController/UnitTests/EmbeddedUnitTests/build/VisualGDB/RelWithDebInfo/CMakeFiles/BSP.dir
-C:/Projects/DTC-SPM/WheelController/UnitTests/EmbeddedUnitTests/build/VisualGDB/RelWithDebInfo/CMakeFiles/BSP_EFP_Profiler.dir
-C:/Projects/DTC-SPM/WheelController/UnitTests/EmbeddedUnitTests/build/VisualGDB/RelWithDebInfo/CMakeFiles/EmbeddedUnitTests.dir
-C:/Projects/DTC-SPM/WheelController/UnitTests/EmbeddedUnitTests/build/VisualGDB/RelWithDebInfo/CMakeFiles/EmbeddedUnitTests-bin.dir
-C:/Projects/DTC-SPM/WheelController/UnitTests/EmbeddedUnitTests/build/VisualGDB/RelWithDebInfo/CMakeFiles/EmbeddedUnitTests.hex.dir
-C:/Projects/DTC-SPM/WheelController/UnitTests/EmbeddedUnitTests/build/VisualGDB/RelWithDebInfo/CMakeFiles/edit_cache.dir
-C:/Projects/DTC-SPM/WheelController/UnitTests/EmbeddedUnitTests/build/VisualGDB/RelWithDebInfo/CMakeFiles/rebuild_cache.dir

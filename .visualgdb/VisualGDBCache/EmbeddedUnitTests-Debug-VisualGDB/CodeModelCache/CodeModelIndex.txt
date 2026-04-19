@@ -1,3 +1,0 @@
-File:..\..\..\..\build\VisualGDB\Debug\.cmake\api\v1\reply\index-2026-04-16T01-34-47-0699.json
-toolchain.prefix=C:/sysgcc/arm-eabi/bin/arm-none-eabi-
-toolchain.extension=.exe
