@@ -1,14 +1,15 @@
 # SoftFloat library
 
-This library is a soft float implementation optimized for speed for the ARM Cortex M3 based microcontrollers
-It is written in C++20, and is constexpr, so all calculations that can be done at compile time will be
-It also implements autodetection and optimization of fused multiplications and additions, to increase speed and accuracy
+This library is a soft float implementation optimized for speed for the ARM Cortex M3 based microcontrollers</br>
+It is written in C++20, and is constexpr, so all calculations that can be done at compile time will be</br>
+It also implements autodetection and optimization of fused multiplications and additions, to increase speed and accuracy</br>
 
-All the library is in a header file called FusedSoftFloat.hh
+All the library is in a header file called FusedSoftFloat.hh</br>
 
-To use it, just include it, and, instead of using the 'float' type for variables, use the 'SoftFloat' type.
-It has equivalent resolution as of IEEE float type (29 bits mantissa, 7 bits exponent)
-No NaN, +/-Inf are handled and/or created
+To use it, just include it, and, instead of using the 'float' type for variables, use the 'SoftFloat' type.</br>
+It has equivalent resolution as of IEEE float type (29 bits mantissa, 7 bits exponent)</br>
+No NaN, +/-Inf are handled and/or created</br>
+</br>
 
 # Expected approximate cycle counts
 
@@ -99,3 +100,7 @@ No NaN, +/-Inf are handled and/or created
 | modf()         | 20     | 58     | 105    |
 | fmod(x,y)      | 80     | 145    | 180    |
 | clamp(v,lo,hi) | 8      | 28     | 50     |
+
+
+### Performance
+At this point, the library is exactly 8 times slower than hardware float support.

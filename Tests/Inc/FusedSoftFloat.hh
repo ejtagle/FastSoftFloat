@@ -348,13 +348,43 @@ public:
 		from_float(f);
 	}
 
+	constexpr SF_HOT const SoftFloat& operator=(int v) noexcept {
+		mantissa = v;
+		exponent = 0;
+		normalise();
+		return *this;
+
+	}
+
+	constexpr SF_HOT const SoftFloat& operator=(int32_t v) noexcept {
+		mantissa = v;
+		exponent = 0;
+		normalise();
+		return *this;
+	}
+
+	constexpr SF_HOT const SoftFloat& operator=(int16_t v) noexcept {
+		mantissa = static_cast<int32_t>(v);
+		exponent = 0;
+		normalise();
+		return *this;
+	}
+
+	constexpr SF_HOT const SoftFloat& operator=(float f) noexcept {
+		mantissa = 0;
+		exponent = 0;
+		from_float(f);
+		return *this;
+	}
+
 	// Proxy constructor (defined after sf_mul_expr)
 	constexpr SF_HOT SoftFloat(const sf_mul_expr& m) noexcept;
 
 	// ------------------------------------------------------------------
-	// Manual re-normalise (public utility, rarely needed)
+	// Manual re-normalise 
 	// ------------------------------------------------------------------
-		// =========================================================================
+	
+	// =========================================================================
 	// Normalisation for [2^29, 2^30)
 	// ---------------------------------------------------------------------
 	// Target: bit29 set, bits 31:30 both zero in abs(mantissa).
@@ -573,11 +603,19 @@ public:
 		return a - SoftFloat(b);
 	}
 	[[nodiscard]] constexpr SF_HOT SF_INLINE SF_FLATTEN
+		friend SoftFloat operator-(SoftFloat a, int b) noexcept {
+		return a - SoftFloat(b);
+	}
+	[[nodiscard]] constexpr SF_HOT SF_INLINE SF_FLATTEN
 		friend SoftFloat operator-(SoftFloat a, int32_t b) noexcept {
 		return a - SoftFloat(b);
 	}
 	[[nodiscard]] constexpr SF_HOT SF_INLINE SF_FLATTEN
 		friend SoftFloat operator-(float a, SoftFloat b) noexcept {
+		return SoftFloat(a) - b;
+	}
+	[[nodiscard]] constexpr SF_HOT SF_INLINE SF_FLATTEN
+		friend SoftFloat operator-(int a, SoftFloat b) noexcept {
 		return SoftFloat(a) - b;
 	}
 	[[nodiscard]] constexpr SF_HOT SF_INLINE SF_FLATTEN
@@ -792,13 +830,51 @@ public:
 	}
 
 	// ------------------------------------------------------------------
-	// Comparison — constexpr (unchanged logic)
+	// Comparison — constexpr
 	// ------------------------------------------------------------------
 	[[nodiscard]] friend constexpr bool operator==(SoftFloat a, SoftFloat b) noexcept {
 		if (!a.mantissa && !b.mantissa) return true;
 		return a.mantissa == b.mantissa && a.exponent == b.exponent;
 	}
+	[[nodiscard]] friend constexpr bool operator==(int av, SoftFloat b) noexcept {
+		const SoftFloat a(av);
+		if (!a.mantissa && !b.mantissa) return true;
+		return a.mantissa == b.mantissa && a.exponent == b.exponent;
+	}
+	[[nodiscard]] friend constexpr bool operator==(int32_t av, SoftFloat b) noexcept {
+		const SoftFloat a(av);
+		if (!a.mantissa && !b.mantissa) return true;
+		return a.mantissa == b.mantissa && a.exponent == b.exponent;
+	}
+	[[nodiscard]] friend constexpr bool operator==(float av, SoftFloat b) noexcept {
+		const SoftFloat a(av);
+		if (!a.mantissa && !b.mantissa) return true;
+		return a.mantissa == b.mantissa && a.exponent == b.exponent;
+	}
+	[[nodiscard]] friend constexpr bool operator==(SoftFloat a, int bv) noexcept {
+		const SoftFloat b(bv);
+		if (!a.mantissa && !b.mantissa) return true;
+		return a.mantissa == b.mantissa && a.exponent == b.exponent;
+	}
+	[[nodiscard]] friend constexpr bool operator==(SoftFloat a, int32_t bv) noexcept {
+		const SoftFloat b(bv);
+		if (!a.mantissa && !b.mantissa) return true;
+		return a.mantissa == b.mantissa && a.exponent == b.exponent;
+	}
+	[[nodiscard]] friend constexpr bool operator==(SoftFloat a, float bv) noexcept {
+		const SoftFloat b(bv);
+		if (!a.mantissa && !b.mantissa) return true;
+		return a.mantissa == b.mantissa && a.exponent == b.exponent;
+	}
+
 	[[nodiscard]] friend constexpr bool operator!=(SoftFloat a, SoftFloat b) noexcept { return !(a == b); }
+	[[nodiscard]] friend constexpr bool operator!=(int a, SoftFloat b) noexcept { return !(a == b); }
+	[[nodiscard]] friend constexpr bool operator!=(int32_t a, SoftFloat b) noexcept { return !(a == b); }
+	[[nodiscard]] friend constexpr bool operator!=(float a, SoftFloat b) noexcept { return !(a == b); }
+	[[nodiscard]] friend constexpr bool operator!=(SoftFloat a, int b) noexcept { return !(a == b); }
+	[[nodiscard]] friend constexpr bool operator!=(SoftFloat a, int32_t b) noexcept { return !(a == b); }
+	[[nodiscard]] friend constexpr bool operator!=(SoftFloat a, float b) noexcept { return !(a == b); }
+
 	[[nodiscard]] friend constexpr bool operator< (SoftFloat a, SoftFloat b) noexcept {
 		if (!a.mantissa && !b.mantissa) return false;
 		if (!a.mantissa) return b.mantissa > 0;
@@ -809,9 +885,95 @@ public:
 			return an ? a.exponent > b.exponent : a.exponent < b.exponent;
 		return an ? a.mantissa > b.mantissa : a.mantissa < b.mantissa;
 	}
+	[[nodiscard]] friend constexpr bool operator< (int av, SoftFloat b) noexcept {
+		const SoftFloat a(av);
+		if (!a.mantissa && !b.mantissa) return false;
+		if (!a.mantissa) return b.mantissa > 0;
+		if (!b.mantissa) return a.mantissa < 0;
+		bool an = a.mantissa < 0, bn = b.mantissa < 0;
+		if (an != bn) return an;
+		if (a.exponent != b.exponent)
+			return an ? a.exponent > b.exponent : a.exponent < b.exponent;
+		return an ? a.mantissa > b.mantissa : a.mantissa < b.mantissa;
+	}
+	[[nodiscard]] friend constexpr bool operator< (int32_t av, SoftFloat b) noexcept {
+		const SoftFloat a(av);
+		if (!a.mantissa && !b.mantissa) return false;
+		if (!a.mantissa) return b.mantissa > 0;
+		if (!b.mantissa) return a.mantissa < 0;
+		bool an = a.mantissa < 0, bn = b.mantissa < 0;
+		if (an != bn) return an;
+		if (a.exponent != b.exponent)
+			return an ? a.exponent > b.exponent : a.exponent < b.exponent;
+		return an ? a.mantissa > b.mantissa : a.mantissa < b.mantissa;
+	}
+	[[nodiscard]] friend constexpr bool operator< (float av, SoftFloat b) noexcept {
+		const SoftFloat a(av);
+		if (!a.mantissa && !b.mantissa) return false;
+		if (!a.mantissa) return b.mantissa > 0;
+		if (!b.mantissa) return a.mantissa < 0;
+		bool an = a.mantissa < 0, bn = b.mantissa < 0;
+		if (an != bn) return an;
+		if (a.exponent != b.exponent)
+			return an ? a.exponent > b.exponent : a.exponent < b.exponent;
+		return an ? a.mantissa > b.mantissa : a.mantissa < b.mantissa;
+	}
+	[[nodiscard]] friend constexpr bool operator< (SoftFloat a, int bv) noexcept {
+		const SoftFloat b(bv);
+		if (!a.mantissa && !b.mantissa) return false;
+		if (!a.mantissa) return b.mantissa > 0;
+		if (!b.mantissa) return a.mantissa < 0;
+		bool an = a.mantissa < 0, bn = b.mantissa < 0;
+		if (an != bn) return an;
+		if (a.exponent != b.exponent)
+			return an ? a.exponent > b.exponent : a.exponent < b.exponent;
+		return an ? a.mantissa > b.mantissa : a.mantissa < b.mantissa;
+	}
+	[[nodiscard]] friend constexpr bool operator< (SoftFloat a, int32_t bv) noexcept {
+		const SoftFloat b(bv);
+		if (!a.mantissa && !b.mantissa) return false;
+		if (!a.mantissa) return b.mantissa > 0;
+		if (!b.mantissa) return a.mantissa < 0;
+		bool an = a.mantissa < 0, bn = b.mantissa < 0;
+		if (an != bn) return an;
+		if (a.exponent != b.exponent)
+			return an ? a.exponent > b.exponent : a.exponent < b.exponent;
+		return an ? a.mantissa > b.mantissa : a.mantissa < b.mantissa;
+	}
+	[[nodiscard]] friend constexpr bool operator< (SoftFloat a, float bv) noexcept {
+		const SoftFloat b(bv);
+		if (!a.mantissa && !b.mantissa) return false;
+		if (!a.mantissa) return b.mantissa > 0;
+		if (!b.mantissa) return a.mantissa < 0;
+		bool an = a.mantissa < 0, bn = b.mantissa < 0;
+		if (an != bn) return an;
+		if (a.exponent != b.exponent)
+			return an ? a.exponent > b.exponent : a.exponent < b.exponent;
+		return an ? a.mantissa > b.mantissa : a.mantissa < b.mantissa;
+	}
 	[[nodiscard]] friend constexpr bool operator> (SoftFloat a, SoftFloat b) noexcept { return b < a; }
+	[[nodiscard]] friend constexpr bool operator> (int a, SoftFloat b) noexcept { return b < a; }
+	[[nodiscard]] friend constexpr bool operator> (int32_t a, SoftFloat b) noexcept { return b < a; }
+	[[nodiscard]] friend constexpr bool operator> (float a, SoftFloat b) noexcept { return b < a; }
+	[[nodiscard]] friend constexpr bool operator> (SoftFloat a, int b) noexcept { return b < a; }
+	[[nodiscard]] friend constexpr bool operator> (SoftFloat a, int32_t b) noexcept { return b < a; }
+	[[nodiscard]] friend constexpr bool operator> (SoftFloat a, float b) noexcept { return b < a; }
+
 	[[nodiscard]] friend constexpr bool operator<=(SoftFloat a, SoftFloat b) noexcept { return !(a > b); }
+	[[nodiscard]] friend constexpr bool operator<=(int a, SoftFloat b) noexcept { return !(a > b); }
+	[[nodiscard]] friend constexpr bool operator<=(int32_t a, SoftFloat b) noexcept { return !(a > b); }
+	[[nodiscard]] friend constexpr bool operator<=(float a, SoftFloat b) noexcept { return !(a > b); }
+	[[nodiscard]] friend constexpr bool operator<=(SoftFloat a, int b) noexcept { return !(a > b); }
+	[[nodiscard]] friend constexpr bool operator<=(SoftFloat a, int32_t b) noexcept { return !(a > b); }
+	[[nodiscard]] friend constexpr bool operator<=(SoftFloat a, float b) noexcept { return !(a > b); }
+
 	[[nodiscard]] friend constexpr bool operator>=(SoftFloat a, SoftFloat b) noexcept { return !(a < b); }
+	[[nodiscard]] friend constexpr bool operator>=(int a, SoftFloat b) noexcept { return !(a < b); }
+	[[nodiscard]] friend constexpr bool operator>=(int32_t a, SoftFloat b) noexcept { return !(a < b); }
+	[[nodiscard]] friend constexpr bool operator>=(float a, SoftFloat b) noexcept { return !(a < b); }
+	[[nodiscard]] friend constexpr bool operator>=(SoftFloat a, int b) noexcept { return !(a < b); }
+	[[nodiscard]] friend constexpr bool operator>=(SoftFloat a, int32_t b) noexcept { return !(a < b); }
+	[[nodiscard]] friend constexpr bool operator>=(SoftFloat a, float b) noexcept { return !(a < b); }
 
 	// ------------------------------------------------------------------
 	// Utility queries — constexpr
@@ -1130,8 +1292,14 @@ constexpr SF_HOT SoftFloat::SoftFloat(const sf_mul_expr& m) noexcept {
 [[nodiscard]] constexpr SF_HOT SF_INLINE sf_mul_expr operator*(SoftFloat a, float b) noexcept {
 	return a * SoftFloat(b);
 }
+[[nodiscard]] constexpr SF_HOT SF_INLINE sf_mul_expr operator*(SoftFloat a, int b) noexcept {
+	return a * SoftFloat(b);
+}
 [[nodiscard]] constexpr SF_HOT SF_INLINE sf_mul_expr operator*(SoftFloat a, int32_t b) noexcept {
 	return a * SoftFloat(b);
+}
+[[nodiscard]] constexpr SF_HOT SF_INLINE sf_mul_expr operator*(int a, SoftFloat b) noexcept {
+	return SoftFloat(a) * b;
 }
 [[nodiscard]] constexpr SF_HOT SF_INLINE sf_mul_expr operator*(int32_t a, SoftFloat b) noexcept {
 	return SoftFloat(a) * b;

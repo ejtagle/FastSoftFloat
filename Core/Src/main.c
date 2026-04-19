@@ -68,11 +68,12 @@ uint32_t GetSysClockFreq(void) {
 
 uint64_t DWT_GetTimeNs() {
 	uint32_t freq = GetSysClockFreq();
-	return (uint64_t)DWT_GetCycleCount()/* * 1000000000ULL / freq*/;
+	return (uint64_t)DWT_GetCycleCount() * 1000000000ULL / freq;
 }
 
 void initialise_monitor_handles(void);
 int main_tests(void);
+void linpack(void);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -118,6 +119,7 @@ int main(void)
   while (1)
   {
 	  main_tests();
+	  linpack();
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
