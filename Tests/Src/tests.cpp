@@ -977,8 +977,8 @@ namespace SoftFloatTest {
 	static bool test_exp_saturation() {
 		bool ok = true;
 
-		SoftFloat max_exp = SoftFloat::from_raw(0x20000000, 127);
-		SoftFloat min_exp = SoftFloat::from_raw(0x20000000, -128);
+		SoftFloat max_exp = SoftFloat(0x20000000, 127);
+		SoftFloat min_exp = SoftFloat(0x20000000, -128);
 
 		// Addition causing exponent overflow
 		SoftFloat r1 = max_exp + max_exp;

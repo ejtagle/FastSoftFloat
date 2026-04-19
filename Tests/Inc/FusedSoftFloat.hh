@@ -146,11 +146,6 @@ template<typename To, typename From>
 // =========================================================================
 constexpr SF_INLINE void sf_normalise_fast(int32_t& m, int32_t& e) noexcept
 {
-	if (UNLIKELY(m == 0)) {
-		e = 0;
-		return;
-	}
-
 	// 1. Branchless Absolute Value
 	// Standard two's complement trick: (x ^ mask) - mask
 	uint32_t sign = static_cast<uint32_t>(m >> 31);
@@ -303,17 +298,19 @@ public:
 	int32_t mantissa /*:24*/;
 	int32_t exponent /*:8*/;
 
-	// ------------------------------------------------------------------
-	// Default constructor — zero
-	// ------------------------------------------------------------------
-	constexpr SoftFloat() noexcept : mantissa{ 0 }, exponent{ 0 } {}
-
+private:
 	// ------------------------------------------------------------------
 	// from_raw — bypass normalisation (caller guarantees invariant)
 	// ------------------------------------------------------------------
 	[[nodiscard]] static constexpr SoftFloat from_raw(int32_t m, int32_t e) noexcept {
 		SoftFloat r; r.mantissa = m; r.exponent = e; return r;
 	}
+public:
+	// ------------------------------------------------------------------
+	// Default constructor — zero
+	// ------------------------------------------------------------------
+	constexpr SoftFloat() noexcept : mantissa{ 0 }, exponent{ 0 } {}
+
 
 	// ------------------------------------------------------------------
 	// Normalising constructors — now constexpr
@@ -504,7 +501,7 @@ public:
 
 			rm = a.mantissa + b.mantissa;
 			re = a.exponent;
-			if (UNLIKELY(rm == 0)) return {};
+			if (UNLIKELY(rm == 0)) return zero();
 			
 			// Detect overflow into bit30 without sf_abs32:
 			// (rm ^ (rm>>31)) gives |rm|-1 for negative, |rm| for positive.
@@ -565,7 +562,7 @@ public:
 			rm = a.mantissa - b.mantissa;
 			re = a.exponent;
 
-			if (UNLIKELY(rm == 0)) return {};
+			if (UNLIKELY(rm == 0)) return zero();
 
 			uint32_t ab = sf_abs32(rm);
 
@@ -634,7 +631,7 @@ public:
 	[[nodiscard]] constexpr SF_HOT SoftFloat operator/(SoftFloat rhs) const noexcept {
 		if (UNLIKELY(!rhs.mantissa))
 			return from_raw(mantissa >= 0 ? (1 << 29) : -(1 << 29), 127);
-		if (UNLIKELY(!mantissa)) return {};
+		if (UNLIKELY(!mantissa)) return zero();
 
 		bool     neg = (mantissa ^ rhs.mantissa) < 0;
 		uint32_t ua = sf_abs32(mantissa);
@@ -793,17 +790,18 @@ public:
 	// ------------------------------------------------------------------
 	[[nodiscard]] constexpr SF_HOT SF_INLINE SF_FLATTEN
 		SoftFloat operator>>(int s) const noexcept {
-		if (!mantissa) return *this;
+		if (UNLIKELY(!mantissa)) return zero();
 		int32_t ne = exponent - s;
-		if (ne < -250) return {};
+		if (UNLIKELY(ne < -250)) return zero();
 		return from_raw(mantissa, ne);
 	}
 	constexpr SF_HOT SF_INLINE SF_FLATTEN
 		const SoftFloat& operator>>=(int s) noexcept {
-		if (!mantissa) return *this;
+		if (UNLIKELY(!mantissa)) return *this;
 		int32_t ne = exponent - s;
-		if (ne < -250) {
-			mantissa = 0; exponent = 0;
+		if (UNLIKELY(ne < -250)) {
+			mantissa = 0; 
+			exponent = 0;
 			return *this;
 		}
 		exponent = ne;
@@ -811,16 +809,17 @@ public:
 	}
 	[[nodiscard]] constexpr SF_HOT SF_INLINE SF_FLATTEN
 		SoftFloat operator<<(int s) const noexcept {
-		if (!mantissa) return *this;
+		if (UNLIKELY(!mantissa)) return zero();
 		int32_t ne = exponent + s;
-		if (ne > 127) return from_raw(mantissa > 0 ? (1 << 29) : -(1 << 29), 127);
+		if (UNLIKELY(ne > 127)) 
+			return from_raw(mantissa > 0 ? (1 << 29) : -(1 << 29), 127);
 		return from_raw(mantissa, ne);
 	}
 	constexpr SF_HOT SF_INLINE SF_FLATTEN
 		const SoftFloat& operator<<=(int s) noexcept {
-		if (!mantissa) return *this;
+		if (UNLIKELY(!mantissa)) return *this;
 		int32_t ne = exponent + s;
-		if (ne > 127) {
+		if (UNLIKELY(ne > 127)) {
 			mantissa = mantissa > 0 ? (1 << 29) : -(1 << 29);
 			exponent = 127;
 			return *this;
@@ -833,37 +832,30 @@ public:
 	// Comparison — constexpr
 	// ------------------------------------------------------------------
 	[[nodiscard]] friend constexpr bool operator==(SoftFloat a, SoftFloat b) noexcept {
-		if (!a.mantissa && !b.mantissa) return true;
 		return a.mantissa == b.mantissa && a.exponent == b.exponent;
 	}
 	[[nodiscard]] friend constexpr bool operator==(int av, SoftFloat b) noexcept {
 		const SoftFloat a(av);
-		if (!a.mantissa && !b.mantissa) return true;
 		return a.mantissa == b.mantissa && a.exponent == b.exponent;
 	}
 	[[nodiscard]] friend constexpr bool operator==(int32_t av, SoftFloat b) noexcept {
 		const SoftFloat a(av);
-		if (!a.mantissa && !b.mantissa) return true;
 		return a.mantissa == b.mantissa && a.exponent == b.exponent;
 	}
 	[[nodiscard]] friend constexpr bool operator==(float av, SoftFloat b) noexcept {
 		const SoftFloat a(av);
-		if (!a.mantissa && !b.mantissa) return true;
 		return a.mantissa == b.mantissa && a.exponent == b.exponent;
 	}
 	[[nodiscard]] friend constexpr bool operator==(SoftFloat a, int bv) noexcept {
 		const SoftFloat b(bv);
-		if (!a.mantissa && !b.mantissa) return true;
 		return a.mantissa == b.mantissa && a.exponent == b.exponent;
 	}
 	[[nodiscard]] friend constexpr bool operator==(SoftFloat a, int32_t bv) noexcept {
 		const SoftFloat b(bv);
-		if (!a.mantissa && !b.mantissa) return true;
 		return a.mantissa == b.mantissa && a.exponent == b.exponent;
 	}
 	[[nodiscard]] friend constexpr bool operator==(SoftFloat a, float bv) noexcept {
 		const SoftFloat b(bv);
-		if (!a.mantissa && !b.mantissa) return true;
 		return a.mantissa == b.mantissa && a.exponent == b.exponent;
 	}
 
@@ -876,7 +868,6 @@ public:
 	[[nodiscard]] friend constexpr bool operator!=(SoftFloat a, float b) noexcept { return !(a == b); }
 
 	[[nodiscard]] friend constexpr bool operator< (SoftFloat a, SoftFloat b) noexcept {
-		if (!a.mantissa && !b.mantissa) return false;
 		if (!a.mantissa) return b.mantissa > 0;
 		if (!b.mantissa) return a.mantissa < 0;
 		bool an = a.mantissa < 0, bn = b.mantissa < 0;
@@ -887,7 +878,6 @@ public:
 	}
 	[[nodiscard]] friend constexpr bool operator< (int av, SoftFloat b) noexcept {
 		const SoftFloat a(av);
-		if (!a.mantissa && !b.mantissa) return false;
 		if (!a.mantissa) return b.mantissa > 0;
 		if (!b.mantissa) return a.mantissa < 0;
 		bool an = a.mantissa < 0, bn = b.mantissa < 0;
@@ -898,7 +888,6 @@ public:
 	}
 	[[nodiscard]] friend constexpr bool operator< (int32_t av, SoftFloat b) noexcept {
 		const SoftFloat a(av);
-		if (!a.mantissa && !b.mantissa) return false;
 		if (!a.mantissa) return b.mantissa > 0;
 		if (!b.mantissa) return a.mantissa < 0;
 		bool an = a.mantissa < 0, bn = b.mantissa < 0;
@@ -909,7 +898,6 @@ public:
 	}
 	[[nodiscard]] friend constexpr bool operator< (float av, SoftFloat b) noexcept {
 		const SoftFloat a(av);
-		if (!a.mantissa && !b.mantissa) return false;
 		if (!a.mantissa) return b.mantissa > 0;
 		if (!b.mantissa) return a.mantissa < 0;
 		bool an = a.mantissa < 0, bn = b.mantissa < 0;
@@ -920,7 +908,6 @@ public:
 	}
 	[[nodiscard]] friend constexpr bool operator< (SoftFloat a, int bv) noexcept {
 		const SoftFloat b(bv);
-		if (!a.mantissa && !b.mantissa) return false;
 		if (!a.mantissa) return b.mantissa > 0;
 		if (!b.mantissa) return a.mantissa < 0;
 		bool an = a.mantissa < 0, bn = b.mantissa < 0;
@@ -931,7 +918,6 @@ public:
 	}
 	[[nodiscard]] friend constexpr bool operator< (SoftFloat a, int32_t bv) noexcept {
 		const SoftFloat b(bv);
-		if (!a.mantissa && !b.mantissa) return false;
 		if (!a.mantissa) return b.mantissa > 0;
 		if (!b.mantissa) return a.mantissa < 0;
 		bool an = a.mantissa < 0, bn = b.mantissa < 0;
@@ -942,7 +928,6 @@ public:
 	}
 	[[nodiscard]] friend constexpr bool operator< (SoftFloat a, float bv) noexcept {
 		const SoftFloat b(bv);
-		if (!a.mantissa && !b.mantissa) return false;
 		if (!a.mantissa) return b.mantissa > 0;
 		if (!b.mantissa) return a.mantissa < 0;
 		bool an = a.mantissa < 0, bn = b.mantissa < 0;
@@ -1073,7 +1058,7 @@ private:
 	friend struct sf_mul_expr;
 
 	[[nodiscard]] static constexpr SF_INLINE SoftFloat sf_finish_addsub(int32_t rm, int32_t re) noexcept {
-		if (UNLIKELY(rm == 0)) return {};
+		if (UNLIKELY(rm == 0)) return zero();
 
 		uint32_t ab = sf_abs32(rm);
 
@@ -1341,7 +1326,7 @@ constexpr SoftFloat& SoftFloat::operator*=(SoftFloat r) noexcept {
 
 	if (d == 0) {
 		int32_t  s = am + pm;
-		if (UNLIKELY(s == 0)) return {};
+		if (UNLIKELY(s == 0)) return SoftFloat::zero();
 		uint32_t ov = static_cast<uint32_t>(s ^ (s >> 31)) >> 30;
 		s >>= static_cast<int>(ov);
 		pe += static_cast<int32_t>(ov);
@@ -1354,7 +1339,7 @@ constexpr SoftFloat& SoftFloat::operator*=(SoftFloat r) noexcept {
 		pm >>= d;
 		exp = a.exponent;     // already in [-128,127]: no SSAT needed
 		int32_t s = am + pm;
-		if (UNLIKELY(s == 0)) return {};
+		if (UNLIKELY(s == 0)) return SoftFloat::zero();
 		sf_normalise_fast(s, exp);
 		return SoftFloat::from_raw(s, exp);
 	}
@@ -1362,7 +1347,7 @@ constexpr SoftFloat& SoftFloat::operator*=(SoftFloat r) noexcept {
 		am >>= -d;
 		exp = pe;             // pe may be up to 283: keep sf_sat_exp
 		int32_t s = am + pm;
-		if (UNLIKELY(s == 0)) return {};
+		if (UNLIKELY(s == 0)) return SoftFloat::zero();
 		exp = sf_sat_exp(exp);
 		sf_normalise_fast(s, exp);
 		return SoftFloat::from_raw(s, exp);
@@ -1398,7 +1383,7 @@ constexpr SoftFloat& SoftFloat::operator*=(SoftFloat r) noexcept {
 
 	if (d == 0) {
 		int32_t  s = am + pm;
-		if (UNLIKELY(s == 0)) return {};
+		if (UNLIKELY(s == 0)) return SoftFloat::zero();
 		uint32_t ov = static_cast<uint32_t>(s ^ (s >> 31)) >> 30;
 		s >>= static_cast<int>(ov);
 		pe += static_cast<int32_t>(ov);
@@ -1411,7 +1396,7 @@ constexpr SoftFloat& SoftFloat::operator*=(SoftFloat r) noexcept {
 		pm >>= d;
 		exp = a.exponent;
 		int32_t s = am + pm;
-		if (UNLIKELY(s == 0)) return {};
+		if (UNLIKELY(s == 0)) return SoftFloat::zero();
 		sf_normalise_fast(s, exp);
 		return SoftFloat::from_raw(s, exp);
 	}
@@ -1419,7 +1404,7 @@ constexpr SoftFloat& SoftFloat::operator*=(SoftFloat r) noexcept {
 		am >>= -d;
 		exp = pe;
 		int32_t s = am + pm;
-		if (UNLIKELY(s == 0)) return {};
+		if (UNLIKELY(s == 0)) return SoftFloat::zero();
 		exp = sf_sat_exp(exp);
 		sf_normalise_fast(s, exp);
 		return SoftFloat::from_raw(s, exp);
@@ -1436,7 +1421,7 @@ constexpr SoftFloat& SoftFloat::operator*=(SoftFloat r) noexcept {
 	if (UNLIKELY(!a.mantissa || !b.mantissa || !c.mantissa || !d.mantissa)) {
 		bool abz = (!a.mantissa || !b.mantissa);
 		bool cdz = (!c.mantissa || !d.mantissa);
-		if (abz && cdz) return {};
+		if (abz && cdz) return SoftFloat::zero();
 		if (abz)        return c * d;
 		if (cdz)        return a * b;
 		// One of the four is zero but both pairs are non-zero: impossible.
@@ -1466,7 +1451,7 @@ constexpr SoftFloat& SoftFloat::operator*=(SoftFloat r) noexcept {
 	int32_t exp;
 	if (d_exp == 0) {
 		int32_t  s = pm1 + pm2;
-		if (UNLIKELY(s == 0)) return {};
+		if (UNLIKELY(s == 0)) return SoftFloat::zero();
 		uint32_t ov = static_cast<uint32_t>(s ^ (s >> 31)) >> 30;
 		s >>= static_cast<int>(ov);
 		pe1 += static_cast<int32_t>(ov);
@@ -1477,7 +1462,7 @@ constexpr SoftFloat& SoftFloat::operator*=(SoftFloat r) noexcept {
 	else { pm1 >>= -d_exp; exp = pe2; }
 
 	int32_t s = pm1 + pm2;
-	if (UNLIKELY(s == 0)) return {};
+	if (UNLIKELY(s == 0)) return SoftFloat::zero();
 	exp = sf_sat_exp(exp);
 	sf_normalise_fast(s, exp);
 	return SoftFloat::from_raw(s, exp);
@@ -1563,6 +1548,7 @@ SoftFloat operator-(const sf_mul_expr& m, SoftFloat a) noexcept {
 [[nodiscard]] constexpr SoftFloat sf_min(SoftFloat a, SoftFloat b)                   noexcept { return (a < b) ? a : b; }
 [[nodiscard]] constexpr SoftFloat sf_max(SoftFloat a, SoftFloat b)                   noexcept { return (a > b) ? a : b; }
 [[nodiscard]] constexpr SoftFloat sf_clamp(SoftFloat v, SoftFloat lo, SoftFloat hi)    noexcept { return v.clamp(lo, hi); }
+[[nodiscard]] constexpr SoftFloatPair sf_sincos(SoftFloat x)                                noexcept { return x.sincos(); }
 [[nodiscard]] constexpr SoftFloat sf_sin(SoftFloat x)                                noexcept { return x.sin(); }
 [[nodiscard]] constexpr SoftFloat sf_cos(SoftFloat x)                                noexcept { return x.cos(); }
 [[nodiscard]] constexpr SoftFloat sf_tan(SoftFloat x)                                noexcept { return x.tan(); }
@@ -1713,7 +1699,8 @@ static constexpr int8_t SF_SIN_EXP[257] = {
 	0,
 };
 
-[[nodiscard]] constexpr SF_HOT SoftFloatPair sf_sincos(SoftFloat x) noexcept {
+[[nodiscard]] constexpr SF_HOT SoftFloatPair SoftFloat::sincos() const noexcept {
+	const SoftFloat x = *this;
 
 	// ── Constants ─────────────────────────────────────────────────────────────
 	// inv_two_pi = 1/(2π) ≈ 0.15915494
@@ -1910,23 +1897,20 @@ static constexpr int8_t SF_SIN_EXP[257] = {
 }
 
 constexpr SoftFloat SoftFloat::tan() const noexcept {
-	auto[s, c] = sf_sincos(*this);
+	auto[s, c] = sincos();
 	if (c.is_zero())
 		return from_raw(s.mantissa >= 0 ? (1 << 29) : -(1 << 29), 127);
 	return s / c;
 }
 
 constexpr SoftFloat SoftFloat::sin() const noexcept { 
-	return sf_sincos(*this).intpart; 
+	return sincos().intpart; 
 }
 
 constexpr SoftFloat SoftFloat::cos() const noexcept { 
-	return sf_sincos(*this).fracpart; 
+	return sincos().fracpart; 
 }
 
-constexpr SoftFloatPair SoftFloat::sincos() const noexcept {
-	return sf_sincos(*this);
-}
 #endif
 
 // asin(x) – polynomial approximation for |x| <= 1
@@ -2239,7 +2223,7 @@ constexpr SF_HOT SoftFloat SoftFloat::inv_sqrt() const noexcept {
 // k1.5 = 1.5:  0x30000000 * 2^-29 = 1.5   clz=2 ✓
 // =========================================================================
 constexpr SF_HOT SoftFloat SoftFloat::inv_sqrt() const noexcept {
-	if (UNLIKELY(mantissa <= 0)) return {};
+	if (UNLIKELY(mantissa <= 0)) return zero();
 
 	// Fast initial estimate via the classic magic-constant bit trick.
 	// Both to_float() and sf_bitcast are constexpr in C++20.
@@ -2270,7 +2254,7 @@ constexpr SF_HOT SoftFloat SoftFloat::inv_sqrt() const noexcept {
 #endif
 
 constexpr SF_HOT SoftFloat SoftFloat::sqrt() const noexcept {
-	if (UNLIKELY(mantissa <= 0)) return {};
+	if (UNLIKELY(mantissa <= 0)) return zero();
 
 	if (SF_IS_CONSTEVAL()) {
 		int32_t m = mantissa;
@@ -2701,7 +2685,7 @@ constexpr SF_HOT SoftFloat atan2(SoftFloat y, SoftFloat x) noexcept {
 	                : SoftFloat::from_raw(result_m, sf_sat_exp(result_e));
 
 	// ----------------------------------------------------------------
-	// Octant reconstruction (unchanged from original)
+	// Octant reconstruction
 	// ----------------------------------------------------------------
 	if (swap)  angle = SoftFloat::half_pi() - angle;
 	if (x_neg) angle = SoftFloat::pi() - angle;
@@ -2739,12 +2723,12 @@ constexpr SF_HOT SoftFloat atan2(SoftFloat y, SoftFloat x) noexcept {
 	SoftFloat t2 = t * t;
 
 	// Coefficients verified for SoftFloat normalization
-	SoftFloat c0 = SoftFloat::from_raw(536870912, -29);     // 1.0
-	SoftFloat c1 = SoftFloat::from_raw(-715827883, -31);    // -1/3
-	SoftFloat c2 = SoftFloat::from_raw(858993459, -32);     // 1/5  
-	SoftFloat c3 = SoftFloat::from_raw(-613566757, -32);    // -1/7
-	SoftFloat c4 = SoftFloat::from_raw(954437177, -33);     // 1/9
-	SoftFloat c5 = SoftFloat::from_raw(-780903145, -33);    // -1/11
+	constexpr SoftFloat c0 = SoftFloat::from_raw(536870912, -29);     // 1.0
+	constexpr SoftFloat c1 = SoftFloat::from_raw(-715827883, -31); // -1/3
+	constexpr SoftFloat c2 = SoftFloat::from_raw(858993459, -32); // 1/5  
+	constexpr SoftFloat c3 = SoftFloat::from_raw(-613566757, -32); // -1/7
+	constexpr SoftFloat c4 = SoftFloat::from_raw(954437177, -33); // 1/9
+	constexpr SoftFloat c5 = SoftFloat::from_raw(-780903145, -33); // -1/11
 
 	// Horner's method
 	SoftFloat p = c5;
@@ -3110,14 +3094,15 @@ constexpr SF_HOT SoftFloat hypot(SoftFloat x, SoftFloat y) noexcept {
 constexpr SF_HOT SoftFloat hypot(SoftFloat x, SoftFloat y) noexcept {
 	x = x.abs(); y = y.abs();
 	if (x < y) { SoftFloat t = x; x = y; y = t; }
-	if (x.mantissa == 0) return {};
+	if (x.mantissa == 0) return SoftFloat::zero();
 
 	// Scale both by 2^{-(e+29)} so xs ≈ [0.5,1) and ys ≤ xs.
 	// This keeps x²+y² in [0.25, 2), well within normalised range.
 	int32_t e = x.exponent;
 	SoftFloat xs = SoftFloat::from_raw(x.mantissa, -29);
-	SoftFloat ys = SoftFloat::from_raw(y.mantissa, y.exponent - e - 29);  // may underflow → zero, which is correct
-
+	SoftFloat ys = y.mantissa != 0
+				? SoftFloat::from_raw(y.mantissa, y.exponent - e - 29)
+				: SoftFloat::zero();
 	SoftFloat r = (xs * xs + ys * ys).sqrt();          // no division
 	return SoftFloat::from_raw(r.mantissa, r.exponent + e + 29);  // restore original scale
 }
