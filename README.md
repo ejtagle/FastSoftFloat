@@ -13,94 +13,66 @@ No NaN, +/-Inf are handled and/or created</br>
 
 # Expected approximate cycle counts
 
-## Basic Arithmetic
-
-### ADDITION / SUBTRACTION
-| Operation | SF min | SF typ | SF max |
-|-----------|--------|--------|--------|
-| operator+ | 8      | 45     | 70     |
-| operator- | 10     | 48     | 75     |
-
-### MULTIPLICATION
-| Operation                            | SF min | SF typ | SF max |
-|--------------------------------------|--------|--------|--------|
-| operator\*                           | 18     | 38     | 58     |
-| fused_mul_add(a,b,c) — a+b·c         | 18     | 55     | 90     |
-| fused_mul_sub(a,b,c) — a−b·c         | 18     | 58     | 95     |
-| fused_mul_mul_add(a,b,c,d) — a·b+c·d | 20     | 72     | 115    |
-
-### DIVISION
-| Operation | SF min | SF typ | SF max |
-|-----------|--------|--------|--------|
-| operator/ | 38     | 75     | 120    |
-
-### Conversions & Scalar Utilities
-| Operation              | SF min | SF typ | SF max |
-|------------------------|--------|--------|--------|
-| operator- (negate)     | 14     | 15     | 16     |
-| abs()                  | 16     | 18     | 20     |
-| operator<< (×2ⁿ scale) | 8      | 15     | 24     |
-| operator>> (÷2ⁿ scale) | 8      | 13     | 18     |
-| operator==             | 12     | 22     | 35     |
-| operator<              | 12     | 28     | 45     |
-| SoftFloat(int32_t)     | 8      | 24     | 38     |
-| SoftFloat(float)       | 8      | 18     | 28     |
-| to_float()             | 8      | 16     | 24     |
-| to_int32()             | 8      | 18     | 30     |
-
-## Transcendental & Math Functions
-
-### SQUARE ROOT / INVERSE SQUARE ROOT
-| Operation                   | SF min | SF typ | SF max |
-|-----------------------------|--------|--------|--------|
-| inv_sqrt() — Q-rsqrt+2×NR   | 70     | 130    | 200    |
-| sqrt() — \*this · inv_sqrt()| 100    | 180    | 280    |
-
-### TRIGONOMETRY (sin/cos: 512-entry table + 1-point FMA interp)
-| Operation                             | SF min | SF typ | SF max |
-|---------------------------------------|--------|--------|--------|
-| sin()                                 | 100    | 170    | 250    |
-| cos()                                 | 100    | 170    | 250    |
-| sincos() — both for cost of one       | 100    | 168    | 248    |
-| tan() — sincos + div                  | 180    | 255    | 380    |
-| asin() — FMS + inv_sqrt + atan2       | 250    | 375    | 535    |
-| acos() — asin chain                   | 265    | 395    | 555    |
-| atan2() — div + 256-entry table + FMA | 90     | 138    | 202    |
-
-### EXPONENTIAL / LOGARITHM (256-entry table + linear interp)
-| Operation                  | SF min | SF typ | SF max |
-|----------------------------|--------|--------|--------|
-| exp()                      | 85     | 128    | 180    |
-| log() — log2 × ln2         | 70     | 108    | 155    |
-| log2()                     | 60     | 95     | 142    |
-| log10() — log2 × log10(2)  | 70     | 108    | 155    |
-| pow(x,y) — log + mul + exp | 225    | 345    | 500    |
-
-### HYPERBOLIC
-| Operation                      | SF min | SF typ | SF max |
-|--------------------------------|--------|--------|--------|
-| sinh() — exp + div             | 200    | 310    | 430    |
-| cosh() — exp + div             | 200    | 310    | 430    |
-| tanh() — exp(2x) + (e−1)/(e+1) | 175    | 280    | 390    |
-
-### GEOMETRY HELPERS
-| Operation                            | SF min | SF typ | SF max |
-|--------------------------------------|--------|--------|--------|
-| hypot(x,y) — scale + fmma + inv_sqrt | 55     | 155    | 275    |
-| lerp(a,b,t) — fused_mul_add path     | 12     | 55     | 95     |
-
-### Rounding & Remainder
-| Operation      | SF min | SF typ | SF max |
-|----------------|--------|--------|--------|
-| trunc()        | 14     | 28     | 48     |
-| floor()        | 16     | 55     | 92     |
-| ceil()         | 16     | 55     | 92     |
-| round()        | 22     | 80     | 138    |
-| fract()        | 18     | 55     | 100    |
-| modf()         | 20     | 58     | 105    |
-| fmod(x,y)      | 80     | 145    | 180    |
-| clamp(v,lo,hi) | 8      | 28     | 50     |
-
+| Function / Operator                     | Min | Typ | Max | Remarks |
+|-----------------------------------------|-----|-----|-----|---------|
+| **Construction / Assignment**           |     |     |     |         |
+| `SoftFloat()` (default)                 | 1   | 1   | 1   | Trivial inline |
+| `SoftFloat(int32_t)`                    | 8   | 10  | 25  | Normalisation: CLZ (1) + shift + SSAT (1). Worst‑case many left shifts. |
+| `SoftFloat(float)`                      | 12  | 15  | 20  | Bit‑cast + IEEE unpack + normalisation. |
+| `operator=(int32_t / float)`            | 8   | 10  | 25  | Same as constructor from same type. |
+| **Conversions**                         |     |     |     |         |
+| `to_float()`                            | 5   | 6   | 8   | Few integer ops + bit‑cast. No normalisation. |
+| `to_int32()`                            | 5   | 7   | 12  | Shift + sign handling. |
+| **Unary**                               |     |     |     |         |
+| `operator-()`                           | 1   | 1   | 1   | Flip sign bit. |
+| `abs()`                                 | 2   | 2   | 2   | Branchless absolute value. |
+| **Addition / Subtraction**              |     |     |     |         |
+| `operator+` (same exponent)             | 8   | 10  | 15  | Add + overflow check (EOR/TST/ASR). |
+| `operator+` (different exponent)        | 10  | 12  | 20  | Alignment shift + add + normalisation. |
+| `operator-` (same exponent)             | 8   | 12  | 20  | Subtract + cancellation normalisation (CLZ). |
+| `operator-` (different exponent)        | 10  | 14  | 22  | Alignment + subtract + normalisation. |
+| **Multiplication**                      |     |     |     |         |
+| `operator*` (deferred via `sf_mul_expr`)| 0   | 0   | 0   | No evaluation; only creates proxy. |
+| `SoftFloat::mul_plain` (materialised)   | 9   | 11  | 14  | SMULL (3‑5) + ORR/MOV + overflow fix‑up. |
+| **Division**                            |     |     |     |         |
+| `operator/` (runtime, Knuth D)          | 20  | 28  | 45  | Two UDIV (2‑12 each) + corrections. |
+| `operator/` (fallback 64‑bit)           | 60  | 70  | 90  | `__aeabi_uldivmod` call. |
+| **Shifts**                              |     |     |     |         |
+| `operator<<` / `operator>>`             | 2   | 3   | 5   | Exponent adjust + saturation check. |
+| **Comparisons**                         |     |     |     |         |
+| `operator==` / `!=`                     | 2   | 2   | 2   | Compare mantissa & exponent. |
+| `operator<` / `>` / `<=` / `>=`         | 6   | 8   | 10  | Sign + exponent + mantissa branching. |
+| **Math Functions**                      |     |     |     |         |
+| `sin()` / `cos()`                       | 45  | 55  | 80  | Range reduction + table lookup (256 entries) + interpolation. |
+| `tan()`                                 | 50  | 60  | 90  | `sincos` + division. |
+| `asin()` / `acos()`                     | 55  | 70  | 100 | `atan2` + `sqrt` (one extra division). |
+| `atan2(y, x)`                           | 55  | 75  | 120 | Table + interpolation + octant logic; UDIV in range reduction. |
+| `exp()`                                 | 35  | 45  | 65  | Range reduction (multiply + to_int32) + table interpolation. |
+| `log()`                                 | 40  | 50  | 70  | `log2` + one multiply. |
+| `log2()`                                | 35  | 45  | 60  | Table lookup (257 entries) + interpolation. |
+| `log10()`                               | 40  | 50  | 70  | `log2` + multiply. |
+| `pow(y)`                                | 70  | 100 | 150 | `exp(y*log(x))`; may use integer exponent fast path. |
+| `sqrt()`                                | 20  | 28  | 40  | `inv_sqrt` + multiply. |
+| `inv_sqrt()`                            | 18  | 25  | 35  | Table seed + two Newton iterations (each ~9‑11 cycles for mul+sub). |
+| `hypot(x, y)`                           | 25  | 35  | 50  | Scaling + multiply + add + `sqrt`. |
+| `sinh()` / `cosh()` / `tanh()`          | 50  | 65  | 90  | `exp` + division/shift. |
+| **Rounding / Truncation**               |     |     |     |         |
+| `trunc()`                               | 8   | 10  | 15  | Convert to int32 + construct back. |
+| `floor()` / `ceil()`                    | 10  | 14  | 20  | Integer shift + sign logic. |
+| `round()`                               | 8   | 12  | 18  | Add bias + shift. |
+| `fract()`                               | 12  | 16  | 22  | `trunc` + subtract. |
+| `modf()`                                | 14  | 18  | 25  | `trunc` + subtract, returns pair. |
+| **Fused Operations**                    |     |     |     |         |
+| `fused_mul_add(a, b, c)`                | 15  | 20  | 30  | Multiply (SMULL) + align + add + normalise. |
+| `fused_mul_sub(a, b, c)`                | 15  | 20  | 30  | Same as add, product negated. |
+| `fused_mul_mul_add(a,b,c,d)`            | 20  | 28  | 40  | Two multiplies + align + add + normalise. |
+| `fused_mul_mul_sub(a,b,c,d)`            | 20  | 28  | 40  | Same as add, second product negated. |
+| **Utilities**                           |     |     |     |         |
+| `clamp(lo, hi)`                         | 12  | 16  | 20  | Two comparisons. |
+| `copysign(sign)`                        | 2   | 2   | 2   | Conditional sign flip. |
+| `fmod(y)`                               | 30  | 40  | 60  | Division + trunc + multiply + subtract. |
+| `fma(b, c)`                             | 15  | 20  | 30  | Same as `fused_mul_add`. |
+| `lerp(a, b, t)`                         | 20  | 28  | 40  | Subtract + multiply + add. |
 
 ### Performance
 At this point, the library is exactly 8 times slower than hardware float support.
