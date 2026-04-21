@@ -3099,10 +3099,104 @@ constexpr SoftFloat SoftFloat::copysign(SoftFloat sign) const noexcept {
 }
 
 constexpr SoftFloat SoftFloat::fmod(SoftFloat y) const noexcept {
-	if (y.mantissa == 0) return *this; // should be NaN, but return 0
-	SoftFloat n = (*this / y).trunc();
-	return *this - n * y;
+	if (UNLIKELY(y.mantissa == 0)) return *this;   // NaN policy: keep yours
+	if (UNLIKELY(mantissa == 0))   return *this;
+
+	int32_t  sx = (mantissa < 0) ? -1 : 1;
+	uint32_t ax = sf_abs32(mantissa);
+	uint32_t ay = sf_abs32(y.mantissa);
+	int32_t  d  = exponent - y.exponent;
+
+	// |x| < |y|  →  remainder is x itself
+	if (d < 0) return *this;
+	if (d == 0 && ax < ay) return *this;
+
+	// Equal exponents: at most one subtraction
+	if (d == 0) {
+		uint32_t r = ax - ay; // ax ≥ ay here
+		if (r == 0) return zero();
+		int32_t rm = static_cast<int32_t>(r);
+		int32_t re = y.exponent;
+		sf_normalise_fast(rm, re);
+		return from_raw(sx * rm, re);
+	}
+
+	// -----------------------------------------------------------------
+	// Compile-time / portable path  (no inline asm, fully constexpr)
+	// -----------------------------------------------------------------
+	if (SF_IS_CONSTEVAL()) {
+		uint64_t r64 = ax;
+		int32_t  rem = d;
+		while (rem > 0) {
+			int shift = (rem > 30) ? 30 : rem; // keep r64<<shift inside 64 bits
+			r64 = (r64 << shift) % ay;
+			rem -= shift;
+		}
+		uint32_t r = static_cast<uint32_t>(r64);
+		if (r == 0) return zero();
+		int32_t rm = static_cast<int32_t>(r);
+		int32_t re = y.exponent;
+		sf_normalise_fast(rm, re);
+		return from_raw(sx * rm, re);
+	}
+
+#if defined(__arm__)
+	    // -----------------------------------------------------------------
+	    // Runtime ARM path: iterative remainder with UDIV.
+	    // r < ay < 2^30  →  r<<2 < 2^32, so every step is a single 32-bit UDIV.
+	    // -----------------------------------------------------------------
+	{
+		uint32_t r   = ax;
+		int32_t  rem = d;
+
+		// Consume 2 bits per iteration; last iteration handles an odd bit.
+		while (rem > 1) {
+			uint32_t num = r << 2; // safe: r < 2^30
+			uint32_t q;
+			__asm__("udiv %0, %1, %2"
+			        : "=r"(q) : "r"(num),
+				"r"(ay));
+			r = num - q * ay; // same as num % ay
+			rem -= 2;
+		}
+		if (rem == 1) {
+			// possible trailing bit
+			uint32_t num = r << 1;
+			uint32_t q;
+			__asm__("udiv %0, %1, %2"
+			        : "=r"(q) : "r"(num),
+				"r"(ay));
+			r = num - q * ay;
+		}
+
+		if (r == 0) return zero();
+		int32_t rm = static_cast<int32_t>(r);
+		int32_t re = y.exponent;
+		sf_normalise_fast(rm, re);
+		return from_raw(sx * rm, re);
+	}
+#else
+	// -----------------------------------------------------------------
+	// Host / non-ARM runtime (same algorithm as constexpr path)
+	// -----------------------------------------------------------------
+	{
+		uint64_t r64 = ax;
+		int32_t  rem = d;
+		while (rem > 0) {
+			int shift = (rem > 30) ? 30 : rem;
+			r64 = (r64 << shift) % ay;
+			rem -= shift;
+		}
+		uint32_t r = static_cast<uint32_t>(r64);
+		if (r == 0) return zero();
+		int32_t rm = static_cast<int32_t>(r);
+		int32_t re = y.exponent;
+		sf_normalise_fast(rm, re);
+		return from_raw(sx * rm, re);
+	}
+#endif
 }
+
 constexpr SoftFloat SoftFloat::fma(SoftFloat b, SoftFloat c) const noexcept {
 	return fused_mul_add(*this, b, c);
 }
