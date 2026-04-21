@@ -1322,69 +1322,47 @@ constexpr SoftFloat& SoftFloat::operator*=(SoftFloat r) noexcept {
 // Fused arithmetic — constexpr (implicitly inline since constexpr)
 // =========================================================================
 
-// =========================================================================
-// fused_mul_add — same-exponent fast path added
-// =========================================================================
-[[nodiscard]] constexpr SF_HOT SoftFloat fused_mul_add(SoftFloat a, SoftFloat b, SoftFloat c) noexcept {
+[[nodiscard]] constexpr SF_HOT SoftFloat fused_mul_add(SoftFloat a, SoftFloat b, SoftFloat c) noexcept
+{
 	if (UNLIKELY(!b.mantissa || !c.mantissa)) return a;
-	if (UNLIKELY(!a.mantissa)) return b * c;
+	if (UNLIKELY(!a.mantissa)) return SoftFloat::mul_plain(b, c);
 
 	int64_t  prod = static_cast<int64_t>(b.mantissa) * static_cast<int64_t>(c.mantissa);
-	int32_t  pm = static_cast<int32_t>(prod >> 29);
-	int32_t  pe = b.exponent + c.exponent + 29;
+	int32_t  pm   = static_cast<int32_t>(prod >> 29);
+	int32_t  pe   = b.exponent + c.exponent + 29;
 
-	// R3-3: XOR trick for 1-bit overflow check
+	// Branchless 1-bit normalisation of the product mantissa
 	uint32_t norm = static_cast<uint32_t>(pm ^ (pm >> 31)) >> 30;
 	pm >>= norm;
 	pe += static_cast<int32_t>(norm);
 
 	int d = a.exponent - pe;
 	if (d >= 31) return a;
-	if (d <= -31) return SoftFloat::from_raw(pm, pe);
+
+	if (d <= -31) {
+		// Product dominates, but pe may itself be out of range.
+		if (UNLIKELY(pe > 127))  return SoftFloat::from_raw(pm >= 0 ? (1 << 29) : -(1 << 29), 127);
+		if (UNLIKELY(pe < -128)) return SoftFloat::zero();
+		return SoftFloat::from_raw(pm, pe);
+	}
 
 	int32_t am = a.mantissa;
 
 	if (d == 0) {
-		int32_t s = am + pm;
-		if (UNLIKELY(s == 0)) return SoftFloat::zero();
-
-		uint32_t abs_s = sf_abs32(s);
-
-		// LIKELY: already normalised (bit29 set, bit30 clear) — no CLZ needed
-		if (LIKELY((abs_s & 0x60000000u) == 0x20000000u)) {
-			pe = sf_sat_exp(pe);
-			return SoftFloat::from_raw(s, pe);
-		}
-		// 1-bit overflow (same-sign sum): shift right once
-		if (abs_s & 0x40000000u) {
-			s >>= 1;
-			pe += 1;
-			pe = sf_sat_exp_fast(pe);
-			return SoftFloat::from_raw(s, pe);
-		}
-		// Cancellation: full renormalise needed (rare)
-		sf_normalise_fast(s, pe);
-		return SoftFloat::from_raw(s, pe);
+		// pe == a.exponent, therefore already in [-128,127]
+		return SoftFloat::sf_finish_addsub(am + pm, pe);
 	}
 
-	int32_t exp;
 	if (d > 0) {
+		// a.exponent is in range by invariant
 		pm >>= d;
-		exp = a.exponent;     // already in [-128,127]: no SSAT needed
-		int32_t s = am + pm;
-		if (UNLIKELY(s == 0)) return SoftFloat::zero();
-		sf_normalise_fast(s, exp);
-		return SoftFloat::from_raw(s, exp);
+		return SoftFloat::sf_finish_addsub(am + pm, a.exponent);
 	}
-	else {
-		am >>= -d;
-		exp = pe;             // pe may be up to 283: keep sf_sat_exp
-		int32_t s = am + pm;
-		if (UNLIKELY(s == 0)) return SoftFloat::zero();
-		exp = sf_sat_exp(exp);
-		sf_normalise_fast(s, exp);
-		return SoftFloat::from_raw(s, exp);
-	}
+
+	// d < 0 : pe may be out of range; saturate once, then let sf_finish_addsub
+	// handle the zero / normalised / overflow / cancellation fast paths.
+	am >>= -d;
+	return SoftFloat::sf_finish_addsub(am + pm, sf_sat_exp(pe));
 }
 
 // =========================================================================
