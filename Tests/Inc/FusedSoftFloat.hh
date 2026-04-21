@@ -2135,55 +2135,102 @@ constexpr SF_HOT SoftFloat SoftFloat::sqrt() const noexcept
 		return SoftFloat(rm, re);
 	}
 
-	// Goldschmidt algorithm: computes sqrt directly, saving one multiply
-	// versus "x * inv_sqrt(x)".
+	const int32_t  E_raw = exponent + 29;
+	const uint32_t a = static_cast<uint32_t>(mantissa);
+
+	// --- Step 1: initial 1/sqrt(a_norm) from table (Q29) ---
+	// y_q29 ≈ 1/sqrt(a_norm), a_norm ∈ [1,2)
+	// so y_q29 ∈ (1/sqrt(2), 1] — no odd-exponent correction here
+	const uint32_t offset = a - 0x20000000u;
+	const uint32_t idx = offset >> 21;
+	const uint32_t frac8 = (offset >> 13) & 0xFFu;
+
+	const int32_t v0 = INV_SQRT_Q29[idx];
+	const int32_t v1 = INV_SQRT_Q29[idx + 1];
+	int32_t y_q29 = v0 + (((v1 - v0) * static_cast<int32_t>(frac8)) >> 8);
+
+	// --- Step 2: initial sqrt estimate g = a * y >> 29 ---
+	// g_q29 ≈ sqrt(a_norm) ∈ [1, sqrt(2))
+	// Invariant: y_q29 * g_q29 ≈ a_norm * 2^58 / a_norm = 2^58  ✓
+	int32_t g_q29;
+#if defined(__arm__)
+	{
+		int32_t lo, hi;
+		__asm__("smull %0, %1, %2, %3"
+			: "=&r"(lo), "=&r"(hi)
+			: "r"(static_cast<int32_t>(a)), "r"(y_q29));
+		g_q29 = (hi << 3) | (static_cast<uint32_t>(lo) >> 29);
+	}
+#else
+	g_q29 = static_cast<int32_t>(
+		(static_cast<uint64_t>(a) * static_cast<uint32_t>(y_q29)) >> 29);
+#endif
+
+	// --- Step 3: Goldschmidt correction ---
+	// r = 0.5 - h*g  where h = y/2
+	// y_q29 * g_q29 ≈ 2^58; >> 29 ≈ 2^29 = 0x20000000
+	// r_q30 = 0x20000000 - (y_q29 * g_q29 >> 29)  ≈ 0
+	// g_q29 += g_q29 * r_q30 >> 30
+	int32_t r_q30;
+#if defined(__arm__)
+	{
+		int32_t lo, hi;
+		__asm__("smull %0, %1, %2, %3"
+			: "=&r"(lo), "=&r"(hi)
+			: "r"(y_q29), "r"(g_q29));
+		r_q30 = static_cast<int32_t>(0x20000000u)
+			- ((hi << 3) | (static_cast<uint32_t>(lo) >> 29));
+	}
+#else
+	{
+		const int64_t yg = static_cast<int64_t>(y_q29) * g_q29;
+		r_q30 = static_cast<int32_t>(0x20000000u) - static_cast<int32_t>(yg >> 29);
+	}
+#endif
+
+#if defined(__arm__)
+	{
+		int32_t lo, hi;
+		__asm__("smull %0, %1, %2, %3"
+			: "=&r"(lo), "=&r"(hi)
+			: "r"(g_q29), "r"(r_q30));
+		g_q29 += (hi << 2) | (static_cast<uint32_t>(lo) >> 30);
+	}
+#else
+	{
+		const int64_t gr = static_cast<int64_t>(g_q29) * r_q30;
+		g_q29 += static_cast<int32_t>(gr >> 30);
+	}
+#endif
+	// g_q29 ≈ sqrt(a_norm) * 2^29, accurate ~40 bits
+	// g_q29 ∈ [0x20000000, 0x2D413CCD] — normalised, no overflow possible
+
+	// --- Step 4: handle odd E_raw ---
+	// Full value = a_norm * 2^E_raw,  sqrt = sqrt(a_norm) * 2^(E_raw/2)
+	// g_q29 = sqrt(a_norm) * 2^29
+	// result = g_q29 * 2^(result_e + 29)  where result_e = (E_raw>>1) - 29
 	//
-	// Start with y0 ≈ 1/sqrt(x) from table (same as inv_sqrt initial guess).
-	// Then:  g = x * y0        (≈ sqrt(x), ~20-bit accurate)
-	//        h = y0 / 2        (free: decrement exponent)
-	//        r = 0.5 - h * g   (≈ 0, second-order error)
-	//        g = g + g * r     (≈ sqrt(x), ~40-bit accurate)
-
-	int32_t  E_raw = exponent + 29;
-	uint32_t a = static_cast<uint32_t>(mantissa);
-	uint32_t offset = a - 0x20000000u;
-	uint32_t idx = offset >> 21;
-	uint32_t frac8 = (offset >> 13) & 0xFFu;
-
-	int32_t v0 = INV_SQRT_Q29[idx];
-	int32_t v1 = INV_SQRT_Q29[idx + 1];
-	int32_t delta = v1 - v0;
-	int32_t y_q29 = v0 + ((delta * static_cast<int32_t>(frac8)) >> 8);
-
+	// When E_raw is odd: E_raw = 2k+1, E_raw>>1 = k
+	//   sqrt(value) = sqrt(a_norm) * 2^k * sqrt(2)
+	//   g_q29 * sqrt(2) puts g into [0x2D41.., 0x3FFF..] — still fits in Q29
+	//   result_e = k - 29 = (E_raw>>1) - 29  (same formula, sqrt(2) absorbed into g)
 	if (E_raw & 1) {
 #if defined(__arm__)
 		int32_t lo, hi;
 		__asm__("smull %0, %1, %2, %3"
 			: "=&r"(lo), "=&r"(hi)
-			: "r"(y_q29), "r"(0x16A09E66));
-		y_q29 = (hi << 3) | (static_cast<uint32_t>(lo) >> 29);
+			: "r"(g_q29), "r"(0x2D413CCD));  // sqrt(2) in Q29
+		g_q29 = (hi << 3) | (static_cast<uint32_t>(lo) >> 29);
 #else
-		y_q29 = static_cast<int32_t>(
-			(static_cast<int64_t>(y_q29) * 0x16A09E66LL) >> 29);
+		g_q29 = static_cast<int32_t>(
+			(static_cast<int64_t>(g_q29) * 0x2D413CCDLL) >> 29);
 #endif
 	}
+	// g_q29 ∈ [0x20000000, 0x3FFFFFFF] — normalised in both cases
 
-	int32_t y_e = -29 - (E_raw >> 1);
-	sf_normalise_fast(y_q29, y_e);
-	SoftFloat y = from_raw(y_q29, y_e);
-
-	// g = x * y  (initial sqrt estimate)
-	SoftFloat g = mul_plain(*this, y);
-
-	// h = y / 2  (no multiply needed)
-	SoftFloat h = from_raw(y.mantissa, y.exponent - 1);
-
-	// r = 0.5 - h*g,  then g = g + g*r = g*(1+r)
-	constexpr SoftFloat half = from_raw(0x20000000, -30); // 0.5
-	SoftFloat r = fused_mul_sub(half, h, g);  // 0.5 - h*g
-	g = g + g * r;
-
-	return g;
+	// --- Step 5: assemble result ---
+	const int32_t result_e = sf_sat_exp((E_raw >> 1) - 29);
+	return from_raw(g_q29, result_e);
 }
 
 #else
