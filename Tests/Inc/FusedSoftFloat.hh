@@ -2023,269 +2023,96 @@ constexpr SoftFloat SoftFloat::tanh() const noexcept {
 	return (e2 - SoftFloat::one()) / (e2 + SoftFloat::one());
 }
 
-#if 1
-// Inverse square root table for mantissa in [1.0, 2.0)
-// f = 1 + i/256, i = 0..256
-// value = mantissa * 2^exponent, normalized to [2^29, 2^30)
 
-static constexpr int32_t INV_SQRT_MANT[257] = {
-	0x20000000, 0x3FE017EC, 0x3FC05F61, 0x3FA0D5E9, 0x3F817B11, 0x3F624E66, 0x3F434F77, 0x3F247DD4,
-	0x3F05D910, 0x3EE760BF, 0x3EC91474, 0x3EAAF3C8, 0x3E8CFE50, 0x3E6F33A7, 0x3E519367, 0x3E341D2B,
-	0x3E16D092, 0x3DF9AD38, 0x3DDCB2BD, 0x3DBFE0C3, 0x3DA336EC, 0x3D86B4DA, 0x3D6A5A31, 0x3D4E2699,
-	0x3D3219B6, 0x3D163331, 0x3CFA72B2, 0x3CDED7E4, 0x3CC36272, 0x3CA81207, 0x3C8CE651, 0x3C71DEFE,
-	0x3C56FBBC, 0x3C3C3C3C, 0x3C21A02F, 0x3C072747, 0x3BECD137, 0x3BD29DB2, 0x3BB88C6E, 0x3B9E9D1F,
-	0x3B84CF7D, 0x3B6B233F, 0x3B51981D, 0x3B382DD0, 0x3B1EE412, 0x3B05BA9E, 0x3AECB12E, 0x3AD3C781,
-	0x3ABAFD52, 0x3AA25260, 0x3A89C669, 0x3A71592C, 0x3A590A6A, 0x3A40D9E3, 0x3A28C759, 0x3A10D28F,
-	0x39F8FB46, 0x39E14144, 0x39C9A44B, 0x39B22421, 0x399AC08C, 0x39837952, 0x396C4E39, 0x39553F0A,
-	0x393E4B8B, 0x39277388, 0x3910B6C7, 0x38FA1514, 0x38E38E39, 0x38CD2201, 0x38B6D037, 0x38A098A9,
-	0x388A7B22, 0x38747770, 0x385E8D61, 0x3848BCC3, 0x38330566, 0x381D6718, 0x3807E1AA, 0x37F274EB,
-	0x37DD20AE, 0x37C7E4C3, 0x37B2C0FC, 0x379DB52C, 0x3788C126, 0x3773E4BC, 0x375F1FC3, 0x374A720F,
-	0x3735DB75, 0x37215BC9, 0x370CF2E1, 0x36F8A094, 0x36E464B7, 0x36D03F22, 0x36BC2FAB, 0x36A8362A,
-	0x36945278, 0x3680846D, 0x366CCBE1, 0x365928AE, 0x36459AAE, 0x363221BA, 0x361EBDAC, 0x360B6E60,
-	0x35F833B1, 0x35E50D79, 0x35D1FB96, 0x35BEFDE2, 0x35AC143A, 0x35993E7C, 0x35867C84, 0x3573CE30,
-	0x3561335D, 0x354EABEA, 0x353C37B6, 0x3529D69F, 0x35178883, 0x35054D44, 0x34F324BF, 0x34E10ED6,
-	0x34CF0B68, 0x34BD1A57, 0x34AB3B82, 0x34996ECC, 0x3487B416, 0x34760B41, 0x3464742F, 0x3452EEC3,
-	0x34417AE0, 0x34301868, 0x341EC73E, 0x340D8746, 0x33FC5863, 0x33EB3A79, 0x33DA2D6C, 0x33C93121,
-	0x33B8457D, 0x33A76A63, 0x33969FBA, 0x3385E566, 0x33753B4E, 0x3364A156, 0x33541766, 0x33439D62,
-	0x33333333, 0x3322D8BE, 0x33128DEB, 0x330252A1, 0x32F226C6, 0x32E20A43, 0x32D1FD00, 0x32C1FEE4,
-	0x32B20FD7, 0x32A22FC3, 0x32925E8F, 0x32829C25, 0x3272E86D, 0x32634351, 0x3253ACBA, 0x32442492,
-	0x3234AAC3, 0x32253F36, 0x3215E1D5, 0x3206928C, 0x31F75143, 0x31E81DE8, 0x31D8F863, 0x31C9E0A0,
-	0x31BAD68B, 0x31ABDA0E, 0x319CEB16, 0x318E098D, 0x317F3561, 0x31706E7C, 0x3161B4CC, 0x3153083C,
-	0x314468BA, 0x3135D631, 0x3127508E, 0x3118D7C0, 0x310A6BB2, 0x30FC0C52, 0x30EDB98E, 0x30DF7354,
-	0x30D13990, 0x30C30C31, 0x30B4EB25, 0x30A6D65A, 0x3098CDBE, 0x308AD140, 0x307CE0CF, 0x306EFC59,
-	0x306123CD, 0x3053571B, 0x30459630, 0x3037E0FD, 0x302A3771, 0x301C997B, 0x300F070C, 0x30018012,
-	0x2FF4047E, 0x2FE69440, 0x2FD92F48, 0x2FCBD586, 0x2FBE86EB, 0x2FB14367, 0x2FA40AEB, 0x2F96DD67,
-	0x2F89BACC, 0x2F7CA30C, 0x2F6F9618, 0x2F6293E0, 0x2F559C56, 0x2F48AF6B, 0x2F3BCD12, 0x2F2EF53A,
-	0x2F2227D7, 0x2F1564DB, 0x2F08AC36, 0x2EFBFDDB, 0x2EEF59BD, 0x2EE2BFCD, 0x2ED62FFE, 0x2EC9AA43,
-	0x2EBD2E8D, 0x2EB0BCD0, 0x2EA454FF, 0x2E97F70B, 0x2E8BA2E9, 0x2E7F588B, 0x2E7317E4, 0x2E66E0E7,
-	0x2E5AB389, 0x2E4E8FBB, 0x2E427573, 0x2E3664A3, 0x2E2A5D3F, 0x2E1E5F3A, 0x2E126A89, 0x2E067F20,
-	0x2DFA9CF2, 0x2DEEC3F4, 0x2DE2F41A, 0x2DD72D58, 0x2DCB6FA3, 0x2DBFBAEE, 0x2DB40F2F, 0x2DA86C5A,
-	0x2D9CD264, 0x2D914141, 0x2D85B8E6, 0x2D7A3949, 0x2D6EC25E, 0x2D63541A, 0x2D57EE72, 0x2D4C915C,
-	0x2D413CCD,
+#if 1
+
+// inv_sqrt table in uniform Q29 format.
+// INV_SQRT_Q29[i] = round(2^29 * inv_sqrt(1 + i/256))  for i=0..256
+// All values in (2^29/sqrt(2), 2^29] = (0x16A09E66, 0x20000000].
+// Derived from original INV_SQRT_MANT: [0] unchanged (was already Q29),
+// [1..256] = INV_SQRT_MANT[i] >> 1 (converting from Q30 to Q29).
+static constexpr int32_t INV_SQRT_Q29[257] = {
+	0x20000000, 0x1FF00BF6, 0x1FE02FB0, 0x1FD06AF4, 0x1FC0BD88, 0x1FB12733, 0x1FA1A7BB, 0x1F923EEA,
+	0x1F82EC88, 0x1F73B05F, 0x1F648A3A, 0x1F5579E4, 0x1F467F28, 0x1F3799D3, 0x1F28C9B3, 0x1F1A0E95,
+	0x1F0B6849, 0x1EFCD69C, 0x1EEE595E, 0x1EDFF061, 0x1ED19B76, 0x1EC35A6D, 0x1EB52D18, 0x1EA7134C,
+	0x1E990CDB, 0x1E8B1998, 0x1E7D3959, 0x1E6F6BF2, 0x1E61B139, 0x1E540903, 0x1E467328, 0x1E38EF7F,
+	0x1E2B7DDE, 0x1E1E1E1E, 0x1E10D017, 0x1E0393A3, 0x1DF6689B, 0x1DE94ED9, 0x1DDC4637, 0x1DCF4E8F,
+	0x1DC267BE, 0x1DB5919F, 0x1DA8CC0E, 0x1D9C16E8, 0x1D8F7209, 0x1D82DD4F, 0x1D765897, 0x1D69E3C0,
+	0x1D5D7EA9, 0x1D512930, 0x1D44E334, 0x1D38AC96, 0x1D2C8535, 0x1D206CF1, 0x1D1463AC, 0x1D086947,
+	0x1CFC7DA3, 0x1CF0A0A2, 0x1CE4D225, 0x1CD91210, 0x1CCD6046, 0x1CC1BCA9, 0x1CB6271C, 0x1CAA9F85,
+	0x1C9F25C5, 0x1C93B9C4, 0x1C885B63, 0x1C7D0A8A, 0x1C71C71C, 0x1C669100, 0x1C5B681B, 0x1C504C54,
+	0x1C453D91, 0x1C3A3BB8, 0x1C2F46B0, 0x1C245E61, 0x1C198AB3, 0x1C0EB38C, 0x1C03F0D5, 0x1BF93A75,
+	0x1BEE9057, 0x1BE3F261, 0x1BD9607E, 0x1BCEDA96, 0x1BC46093, 0x1BB9F25E, 0x1BAF8FE1, 0x1BA53907,
+	0x1B9AEDBA, 0x1B90ADE4, 0x1B867970, 0x1B7C504A, 0x1B72325B, 0x1B681F91, 0x1B5E17D5, 0x1B541B15,
+	0x1B4A293C, 0x1B404236, 0x1B3665F0, 0x1B2C9457, 0x1B22CD57, 0x1B1910DD, 0x1B0F5ED6, 0x1B05B730,
+	0x1AFC19D8, 0x1AF286BC, 0x1AE8FDCB, 0x1ADF7EF1, 0x1AD60A1D, 0x1ACC9F3E, 0x1AC33E42, 0x1AB9E718,
+	0x1AB099AE, 0x1AA755F5, 0x1A9E1BDB, 0x1A94EB4F, 0x1A8BC441, 0x1A82A6A2, 0x1A79925F, 0x1A70876B,
+	0x1A6785B4, 0x1A5E8D2B, 0x1A559DC1, 0x1A4CB766, 0x1A43DA0B, 0x1A3B05A0, 0x1A323A17, 0x1A297761,
+	0x1A20BD70, 0x1A180C34, 0x1A0F639F, 0x1A06C3A3, 0x19FE2C31, 0x19F59D3C, 0x19ED16B6, 0x19E49890,
+	0x19DC22BE, 0x19D3B531, 0x19CB4FDD, 0x19C2F2B3, 0x19BA9DA7, 0x19B250AB, 0x19AA0BB3, 0x19A1CEB1,
+	0x19999999, 0x19916D5F, 0x198946F5, 0x19812950, 0x19791363, 0x19710521, 0x1968FE80, 0x1960FF72,
+	0x195907EB, 0x195117E1, 0x19492F47, 0x19414E12, 0x19397436, 0x1931A1A8, 0x1929D65D, 0x19221249,
+	0x191A5561, 0x19129F9B, 0x190AF0EA, 0x19034946, 0x18FBA8A1, 0x18F40EF4, 0x18EC7C31, 0x18E4F050,
+	0x18DD6B45, 0x18D5ED07, 0x18CE758B, 0x18C704C6, 0x18BF9AB0, 0x18B8373E, 0x18B0DA66, 0x18A9841E,
+	0x18A2345D, 0x189AEB18, 0x1893A847, 0x188C6BE0, 0x188535D9, 0x187E0629, 0x1876DCCF, 0x186FB9AA,
+	0x18689CC8, 0x18618618, 0x185A7592, 0x18536B2D, 0x184C66DF, 0x184568A0, 0x183E7067, 0x18377E2C,
+	0x183091E6, 0x1829AB8D, 0x1822CB18, 0x181BF07E, 0x18151BB8, 0x180E4CBD, 0x18078386, 0x1800C009,
+	0x17FA023F, 0x17F34A20, 0x17EC97A4, 0x17E5EAC3, 0x17DF4375, 0x17D8A1B3, 0x17D20575, 0x17CB6EB3,
+	0x17C4DD66, 0x17BE5186, 0x17B7CB0C, 0x17B149F0, 0x17AACE2B, 0x17A457B5, 0x179DE689, 0x17977A9D,
+	0x179113EB, 0x178AB26D, 0x1784561B, 0x177EFEED, 0x177AACDE, 0x17715FE6, 0x176B17FF, 0x1764D521,
+	0x175E9746, 0x17585E68, 0x17522A7F, 0x174BFB85, 0x1745D174, 0x173FAC45, 0x17398BF2, 0x17337073,
+	0x172D59C4, 0x172747DD, 0x172139B9, 0x171B3251, 0x17152E9F, 0x170F2F9D, 0x17093544, 0x17033F90,
+	0x16FD4E79, 0x16F761FA, 0x16F17A0D, 0x16EB96AC, 0x16E5B7D1, 0x16DFDD77, 0x16DA0797, 0x16D4362D,
+	0x16CE6932, 0x16C8A0A0, 0x16C2DC73, 0x16BD1CA4, 0x16B7612F, 0x16B1AA0D, 0x16ABF739, 0x16A648AE,
+	0x16A09E66,
 };
 
-constexpr SF_HOT SoftFloat SoftFloat::inv_sqrt() const noexcept {
+constexpr SF_HOT SoftFloat SoftFloat::inv_sqrt() const noexcept
+{
 	if (UNLIKELY(mantissa <= 0)) return zero();
 
-	// ── Decompose: x = f * 2^E, f in [1,2), E = exponent + 29 ───────────
-	// We need E to be even so that 2^{-E/2} is exact.
-	// If E is odd, multiply f by 2 (making f in [2,4)) and decrement E by 1,
-	// keeping E even. Then f/2 is in [1,2) — equivalently, we use the upper
-	// half of the table (f in [1,2) still, but x has been scaled).
-	//
-	// Simpler: just track the odd/even parity and use the mantissa directly.
-	//
-	//   E_raw = exponent + 29
-	//   If E_raw is odd: work with (mantissa << 1) at exponent (exponent - 1)
-	//                    so E_eff = (exponent - 1) + 29 = E_raw - 1  (even)
-	//                    and the mantissa is now in [2^30, 2^31) — need >>1 for table
-	//   Better: keep mantissa in [2^29,2^30) always and just note parity.
+	int32_t  E_raw = exponent + 29;
+	uint32_t a = static_cast<uint32_t>(mantissa);
+	uint32_t offset = a - 0x20000000u;
+	uint32_t idx = offset >> 21;
+	uint32_t frac8 = (offset >> 13) & 0xFFu;
 
-	int32_t E_raw = exponent + 29; // x = (mantissa*2^{-29}) * 2^{E_raw}
+	// Uniform Q29 table lookup — no special case for idx=0
+	int32_t v0 = INV_SQRT_Q29[idx];
+	int32_t v1 = INV_SQRT_Q29[idx + 1];
+	int32_t delta = v1 - v0;
+	int32_t y_q29 = v0 + ((delta * static_cast<int32_t>(frac8)) >> 8);
 
-	// We will look up in the table using the mantissa as-is (f in [1,2)).
-	// The table gives y = 1/sqrt(f) with y stored at exponent -30 (except idx=0 at -29).
-	// Final result exponent = (table exponent) - E_raw/2.
-	//
-	// But we need E_raw to be even for exact half-exponent. Handle odd E_raw:
-	//   If odd, scale x by 2: new_x = x*2 = f*2 * 2^{E_raw-1}, E_eff = E_raw-1 (even).
-	//   inv_sqrt(x) = inv_sqrt(new_x/2) = inv_sqrt(new_x) * sqrt(2)
-	//              => multiply result by sqrt(2) = 1/inv_sqrt(2).
-	//
-	// Equivalently: if E_raw odd, we use (mantissa<<1) for table lookup
-	//   (which doubles f into [2,4)), then the table gives 1/sqrt(f*2),
-	//   and we correct by sqrt(2). 
-	//
-	// Cleanest: separate the mantissa lookup from the exponent correction.
-
-	uint32_t a = static_cast<uint32_t>(mantissa); // in [2^29, 2^30)
-
-	// ── Table lookup with parity-adjusted mantissa ────────────────────────
-	// We always look up using `a` (the original mantissa), giving us
-	// y_table = 1/sqrt(f), f = a * 2^{-29}, y_table at effective exp -30.
-	//
-	// The true result is:
-	//   inv_sqrt(x) = y_table * 2^{-E_raw/2}
-	//
-	// If E_raw is even:
-	//   result = y_table * 2^{-E_raw/2}
-	//   result_exp = -30 - E_raw/2    [but idx=0 is at -29, so +1 for that case]
-	//
-	// If E_raw is odd:
-	//   2^{-E_raw/2} = 2^{-(E_raw-1)/2} * 2^{-1/2} = 2^{-E_raw/2} * sqrt(2)/sqrt(2)...
-	//   Write E_raw = 2k+1:
-	//   inv_sqrt(f * 2^{2k+1}) = inv_sqrt(f) * 2^{-(2k+1)/2}
-	//                          = inv_sqrt(f) * 2^{-k} * 2^{-1/2}
-	//                          = y_table * 2^{-k-30} * sqrt(2)   [at table exp -30]
-	//   result_exp = -30 - k  = -30 - (E_raw-1)/2  = -30 - E_raw/2  (integer div)
-	//   and multiply by sqrt(2) ≈ 1.41421356.
-
-	uint32_t offset = a - 0x20000000u; // [0, 2^29)
-	uint32_t idx    = offset >> 21; // [0, 255]
-	uint32_t frac8  = (offset >> 13) & 0xFFu; // [0, 255]
-
-	// ── Fixed-point interpolation in Q2.30 ───────────────────────────────
-	int32_t y_q30;
-	int32_t table_exp; // actual exponent of the interpolated table value
-
-	if (UNLIKELY(idx == 0)) {
-		// v0 at exponent -29: INV_SQRT_MANT[0] = 0x20000000 = 1.0 * 2^29 * 2^{-29}
-		// v1 at exponent -30: INV_SQRT_MANT[1]
-		// Bring v0 to exponent -30 by right-shifting mantissa by 1.
-		int32_t v0_q30 = static_cast<int32_t>(INV_SQRT_MANT[0] >> 1); // 0x10000000
-		int32_t v1_q30 = INV_SQRT_MANT[1];
-
-		int32_t delta  = v1_q30 - v0_q30;
-		// delta*frac8: delta ~ -0x03FE17EC (large), use int64_t
-		int32_t corr   = static_cast<int32_t>(
-		    (static_cast<int64_t>(delta) * static_cast<int64_t>(frac8)) >> 8
-		);
-		y_q30     = v0_q30 + corr;
-		table_exp = -30; // we normalised v0 to -30
-	}
-	else {
-		// Normal case: both entries at exponent -30.
-		int32_t v0_q30 = INV_SQRT_MANT[idx];
-		int32_t v1_q30 = INV_SQRT_MANT[idx + 1];
-
-		int32_t delta  = v1_q30 - v0_q30; // negative (table is decreasing), fits int32_t
-		// delta < 2^23, frac8 < 256: product < 2^31, safe in int32_t
-		int32_t corr   = (delta * static_cast<int32_t>(frac8)) >> 8;
-		y_q30          = v0_q30 + corr;
-		table_exp      = -30;
-	}
-
-	// ── Compute result exponent ───────────────────────────────────────────
-	// y_table = y_q30 * 2^{table_exp} = 1/sqrt(f)
-	// inv_sqrt(x) = y_table * 2^{-E_raw/2}     (if E_raw even)
-	//             = y_table * sqrt(2) * 2^{-E_raw/2}   (if E_raw odd)
-	//
-	// result_exp = table_exp - (E_raw >> 1)
-	//            = -30 - (E_raw >> 1)
-	//
-	// Verification for inv_sqrt(4):
-	//   mantissa=0x20000000, exponent=-27
-	//   E_raw = -27+29 = 2 (even)
-	//   idx=0, v0_q30=0x10000000, frac8=0 => y_q30=0x10000000
-	//   table_exp = -30
-	//   result_exp = -30 - (2>>1) = -30 - 1 = -31
-	//   y = 0x10000000 * 2^{-31} = 2^{28} * 2^{-31} = 2^{-3} = 0.125  ✗
-	//
-	// Still wrong! The issue: idx=0, v0_q30 = INV_SQRT_MANT[0]>>1 = 0x10000000
-	// But the true value at idx=0, frac=0 is inv_sqrt(1.0) = 1.0.
-	// 1.0 in Q at exp -30 = 2^30 * 2^{-30} = 0x40000000 * 2^{-30}.
-	// But 0x40000000 is out of [2^29,2^30)! So we represent 1.0 as:
-	//   0x20000000 * 2^{-29}   (that's what INV_SQRT_MANT[0]/INV_SQRT_EXP[0] says)
-	//
-	// The real fix: do NOT shift v0 to exp -30 at idx=0.
-	// Instead, keep table_exp = -29 for that entry and handle it properly.
-
-	// ── CORRECT approach: keep each entry at its true exponent ───────────
-	// Since only idx=0 differs (exp=-29 vs -30), and the interpolation
-	// crosses the boundary, we handle it as follows:
-	//
-	// For idx=0: interpolate between:
-	//   v0 = 1.0         at exp -29: mantissa = 0x20000000
-	//   v1 = ~0.9980...  at exp -30: mantissa = INV_SQRT_MANT[1]
-	//
-	// Align both to the coarser exponent (-29) for interpolation:
-	//   v0_at29 = 0x20000000  (no change)
-	//   v1_at29 = INV_SQRT_MANT[1] >> 1  (right shift by 1 to go from -30 to -29)
-	//   delta_at29 = v1_at29 - v0_at29  (small negative)
-	//   y_at29 = v0_at29 + (delta_at29 * frac8) >> 8
-	//   table_exp = -29
-	//
-	// For idx >= 1: both at -30, table_exp = -30.
-
-	// Redo:
-	if (UNLIKELY(idx == 0)) {
-		int32_t v0_at29 = INV_SQRT_MANT[0]; // 0x20000000, exp -29
-		int32_t v1_at29 = INV_SQRT_MANT[1] >> 1; // bring exp-30 entry to exp-29
-		int32_t delta   = v1_at29 - v0_at29; // small negative
-		int32_t corr    = static_cast<int32_t>(
-		    (static_cast<int64_t>(delta) * static_cast<int64_t>(frac8)) >> 8
-		);
-		y_q30     = v0_at29 + corr;
-		table_exp = -29;
-	}
-	else {
-		int32_t v0_q30 = INV_SQRT_MANT[idx];
-		int32_t v1_q30 = INV_SQRT_MANT[idx + 1];
-		int32_t delta  = v1_q30 - v0_q30;
-		int32_t corr   = (delta * static_cast<int32_t>(frac8)) >> 8;
-		y_q30          = v0_q30 + corr;
-		table_exp      = -30;
-	}
-
-	// result_exp = table_exp - (E_raw >> 1)
-	//
-	// Verify inv_sqrt(4):
-	//   E_raw=2, idx=0, table_exp=-29
-	//   result_exp = -29 - 1 = -30  ✓  (0x20000000 * 2^{-30} = 0.5)
-	//
-	// Verify inv_sqrt(2):
-	//   mantissa=0x20000000, exponent=-28
-	//   E_raw = -28+29 = 1 (odd)
-	//   idx=0, y_q30=0x20000000, table_exp=-29
-	//   result_exp = -29 - 0 = -29
-	//   y = 0x20000000 * 2^{-29} * sqrt(2) = 1.0 * 1.41421 = 1.41421  ✗
-	//   Expected: 1/sqrt(2) = 0.7071...
-	//
-	// Hmm: for inv_sqrt(2), f=1.0, E_raw=1.
-	//   inv_sqrt(2) = inv_sqrt(f=1) * 2^{-E_raw/2} = 1.0 * 2^{-0.5} = 1/sqrt(2)
-	//   = 1.0 * sqrt(2)/2 = sqrt(2) * 2^{-1}
-	//   With odd E: result = y_table * sqrt(2) * 2^{-(E_raw>>1)} * 2^{-1}
-	//   Wait, let me be more careful.
-	//
-	//   E_raw = 1 = 2*0 + 1, so k=0.
-	//   inv_sqrt(f * 2^1) = inv_sqrt(f) * 2^{-1/2}
-	//                     = 1.0 * 2^{-1/2}
-	//                     = (1/sqrt(2))
-	//   In fixed point: result = y_q30 * 2^{table_exp} * 2^{-1/2}
-	//   We handle 2^{-1/2} by multiplying by INV_SQRT2.
-	//   result_exp = table_exp - (E_raw>>1) = -29 - 0 = -29
-	//   After multiply by INV_SQRT2 (= 0x2D413CCD at exp -30 relative):
-	//     y_q30 * INV_SQRT2_Q30 >> 30 at exp -29:
-	//     = 0x20000000 * 0x2D413CCD >> 30
-	//     = 2^29 * 759250125 >> 30
-	//     = 759250125 >> 1 = 379625062 ... that's > 2^29? No: 379625062 < 2^29=536870912. 
-	//     Hmm that's ~0.707*2^29 which is correct for 1/sqrt(2).
-	//   Then sf_normalise_fast will shift left to normalise.
-	//   After normalise: result = 0x2D413CCD * 2^{-30}  which is 1/sqrt(2) ✓
-
-	int32_t result_e = table_exp - (E_raw >> 1);
-
+	// Odd exponent adjustment: multiply by 1/sqrt(2) in Q29
 	if (E_raw & 1) {
-		// Multiply y_q30 by 1/sqrt(2) in fixed point.
-		// INV_SQRT2 = 0x2D413CCD represents 1/sqrt(2) * 2^30 (i.e., at Q0.30).
-		// y_q30 * INV_SQRT2 >> 30 stays at the same exponent (table_exp).
-		constexpr int32_t INV_SQRT2_Q30 = 0x2D413CCD;
-		int64_t scaled = static_cast<int64_t>(y_q30)
-		               * static_cast<int64_t>(INV_SQRT2_Q30);
-		y_q30 = static_cast<int32_t>(scaled >> 30);
-		// result_e is unchanged: the >> 30 cancels the implicit 2^30 in INV_SQRT2_Q30.
+#if defined(__arm__)
+		if (!SF_IS_CONSTEVAL()) {
+			int32_t lo, hi;
+			__asm__("smull %0, %1, %2, %3"
+				: "=&r"(lo), "=&r"(hi)
+				: "r"(y_q29), "r"(0x16A09E66));
+			// Q29 * Q29 >> 29 = Q29
+			y_q29 = (hi << 3) | (static_cast<uint32_t>(lo) >> 29);
+		}
+		else
+#endif
+		{
+			y_q29 = static_cast<int32_t>(
+				(static_cast<int64_t>(y_q29) * 0x16A09E66LL) >> 29);
+		}
 	}
 
-	// ── One-or-two-bit normalise ──────────────────────────────────────────
-	// After interpolation, y_q30 should be in [2^29, 2^30).
-	// After the INV_SQRT2 multiply it may be as low as ~0.707 * 2^29.
-	// sf_normalise_fast handles all cases.
-	sf_normalise_fast(y_q30, result_e);
+	// result exponent: y represents mantissa/2^29, scaled by 2^(-(E_raw/2))
+	int32_t result_e = -29 - (E_raw >> 1);
+	sf_normalise_fast(y_q29, result_e);
+	SoftFloat y = from_raw(y_q29, result_e);
 
-	// ── Newton-Raphson refinement ─────────────────────────────────────────
-	SoftFloat y  = from_raw(y_q30, result_e);
-	SoftFloat hx = from_raw(mantissa, exponent - 1); // 0.5 * x
-	constexpr SoftFloat k15 = from_raw(0x30000000, -29); // 1.5
-
-	// Iteration 1
+	// Single Newton-Raphson step: y *= (1.5 - 0.5*x * y^2)
+	// Table gives ~20-bit accuracy; one step yields ~40 bits >> 30 needed.
 	{
-		SoftFloat y2   = y * y;
-		SoftFloat step = fused_mul_sub(k15, hx, y2);
-		y *= step;
-	}
-	// Iteration 2
-	{
-		SoftFloat y2   = y * y;
+		constexpr SoftFloat k15 = from_raw(0x30000000, -29); // 1.5
+		SoftFloat hx = from_raw(mantissa, exponent - 1);      // x/2
+		SoftFloat y2 = y * y;
 		SoftFloat step = fused_mul_sub(k15, hx, y2);
 		y *= step;
 	}
@@ -2293,7 +2120,74 @@ constexpr SF_HOT SoftFloat SoftFloat::inv_sqrt() const noexcept {
 	return y;
 }
 
+constexpr SF_HOT SoftFloat SoftFloat::sqrt() const noexcept
+{
+	if (UNLIKELY(mantissa <= 0)) return zero();
+
+	if (SF_IS_CONSTEVAL()) {
+		int32_t m = mantissa;
+		int32_t e = exponent;
+		if (e & 1) { m <<= 1; e -= 1; }
+		uint64_t scaled = static_cast<uint64_t>(m) << 30;
+		uint64_t root = ct_isqrt64(scaled);
+		int32_t  rm = static_cast<int32_t>(root);
+		int32_t  re = e / 2 - 15;
+		return SoftFloat(rm, re);
+	}
+
+	// Goldschmidt algorithm: computes sqrt directly, saving one multiply
+	// versus "x * inv_sqrt(x)".
+	//
+	// Start with y0 ≈ 1/sqrt(x) from table (same as inv_sqrt initial guess).
+	// Then:  g = x * y0        (≈ sqrt(x), ~20-bit accurate)
+	//        h = y0 / 2        (free: decrement exponent)
+	//        r = 0.5 - h * g   (≈ 0, second-order error)
+	//        g = g + g * r     (≈ sqrt(x), ~40-bit accurate)
+
+	int32_t  E_raw = exponent + 29;
+	uint32_t a = static_cast<uint32_t>(mantissa);
+	uint32_t offset = a - 0x20000000u;
+	uint32_t idx = offset >> 21;
+	uint32_t frac8 = (offset >> 13) & 0xFFu;
+
+	int32_t v0 = INV_SQRT_Q29[idx];
+	int32_t v1 = INV_SQRT_Q29[idx + 1];
+	int32_t delta = v1 - v0;
+	int32_t y_q29 = v0 + ((delta * static_cast<int32_t>(frac8)) >> 8);
+
+	if (E_raw & 1) {
+#if defined(__arm__)
+		int32_t lo, hi;
+		__asm__("smull %0, %1, %2, %3"
+			: "=&r"(lo), "=&r"(hi)
+			: "r"(y_q29), "r"(0x16A09E66));
+		y_q29 = (hi << 3) | (static_cast<uint32_t>(lo) >> 29);
 #else
+		y_q29 = static_cast<int32_t>(
+			(static_cast<int64_t>(y_q29) * 0x16A09E66LL) >> 29);
+#endif
+	}
+
+	int32_t y_e = -29 - (E_raw >> 1);
+	sf_normalise_fast(y_q29, y_e);
+	SoftFloat y = from_raw(y_q29, y_e);
+
+	// g = x * y  (initial sqrt estimate)
+	SoftFloat g = mul_plain(*this, y);
+
+	// h = y / 2  (no multiply needed)
+	SoftFloat h = from_raw(y.mantissa, y.exponent - 1);
+
+	// r = 0.5 - h*g,  then g = g + g*r = g*(1+r)
+	constexpr SoftFloat half = from_raw(0x20000000, -30); // 0.5
+	SoftFloat r = fused_mul_sub(half, h, g);  // 0.5 - h*g
+	g = g + g * r;
+
+	return g;
+}
+
+#else
+
 // =========================================================================
 // Inverse square root — Q-rsqrt seed + 2× Newton-Raphson, constexpr
 //
@@ -2328,7 +2222,6 @@ constexpr SF_HOT SoftFloat SoftFloat::inv_sqrt() const noexcept {
 	}
 	return y;
 }
-#endif
 
 constexpr SF_HOT SoftFloat SoftFloat::sqrt() const noexcept {
 	if (UNLIKELY(mantissa <= 0)) return zero();
@@ -2357,6 +2250,9 @@ constexpr SF_HOT SoftFloat SoftFloat::sqrt() const noexcept {
 
 	return *this * inv_sqrt();
 }
+
+#endif
+
 
 #if 1
 // ---------------------------------------------------------------------
