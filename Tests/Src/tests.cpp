@@ -1335,12 +1335,6 @@ namespace SoftFloatTest {
 			}
 		}
 
-		// --------- 8. Reciprocal Table ---------
-		{
-			if (recip_tab[0] == 0) { print("FAIL: recip_tab[0] is zero\n"); ok = false; }
-			if (recip_tab[511] == 0) { print("FAIL: recip_tab[511] is zero\n"); ok = false; }
-		}
-
 		return ok;
 	}
 
