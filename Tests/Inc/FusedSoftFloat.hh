@@ -832,6 +832,29 @@ public:
 	}
 
 	// ------------------------------------------------------------------
+	// reciprocal — 1/x via sf_recip, O(1)
+	// ------------------------------------------------------------------
+	[[nodiscard]] constexpr SF_HOT SoftFloat reciprocal() const noexcept {
+		if (UNLIKELY(!mantissa))
+			return from_raw(mantissa >= 0 ? (1 << 29) : -(1 << 29), 127);
+
+		bool     neg = mantissa < 0;
+		uint32_t ua  = sf_abs32(mantissa);
+		uint64_t Y   = sf_recip(ua); // 2^60 / ua
+
+		uint32_t qm  = static_cast<uint32_t>(Y >> 1); // [2^29, 2^30]
+		int32_t  qe  = -59 - exponent;
+
+		if (UNLIKELY(qm & 0x40000000u)) {
+			// exactly 2^30 → shift once
+			qm >>= 1;
+			qe += 1;
+		}
+		qe = sf_sat_exp(qe);
+		return from_raw(neg ? -static_cast<int32_t>(qm) : static_cast<int32_t>(qm), qe);
+	}
+	
+	// ------------------------------------------------------------------
 	// Power-of-2 scaling (exponent adjust only, O(1)) — constexpr
 	// ------------------------------------------------------------------
 	[[nodiscard]] constexpr SF_HOT SF_INLINE SF_FLATTEN
@@ -1229,6 +1252,7 @@ struct sf_mul_expr {
 	[[nodiscard]] constexpr SoftFloat fmod(SoftFloat y) const noexcept { return eval().fmod(y); }
 	[[nodiscard]] constexpr SoftFloat fma(SoftFloat b, SoftFloat c) const noexcept { return eval().fma(b, c); }
 	[[nodiscard]] constexpr SoftFloat inv_sqrt()          const noexcept { return eval().inv_sqrt(); }
+	[[nodiscard]] constexpr SoftFloat reciprocal()          const noexcept { return eval().reciprocal(); }
 	[[nodiscard]] constexpr SoftFloat clamp(SoftFloat lo, SoftFloat hi) const noexcept {
 		return eval().clamp(lo, hi);
 	}
@@ -1554,6 +1578,7 @@ SoftFloat operator-(const sf_mul_expr& m, SoftFloat a) noexcept {
 [[nodiscard]] constexpr SoftFloat sf_fmod(SoftFloat x, SoftFloat y) noexcept { return x.fmod(y); }
 [[nodiscard]] constexpr SoftFloat sf_fma(SoftFloat x, SoftFloat b, SoftFloat c) noexcept { return x.fma(b, c); }
 [[nodiscard]] constexpr SoftFloat sf_inv_sqrt(SoftFloat x)                                noexcept { return x.inv_sqrt(); }
+[[nodiscard]] constexpr SoftFloat sf_reciprocal(SoftFloat x)                                noexcept { return x.reciprocal(); }
 [[nodiscard]] constexpr SoftFloat sf_min(SoftFloat a, SoftFloat b)                   noexcept { return (a < b) ? a : b; }
 [[nodiscard]] constexpr SoftFloat sf_max(SoftFloat a, SoftFloat b)                   noexcept { return (a > b) ? a : b; }
 [[nodiscard]] constexpr SoftFloat sf_clamp(SoftFloat v, SoftFloat lo, SoftFloat hi)    noexcept { return v.clamp(lo, hi); }
@@ -1884,19 +1909,18 @@ constexpr SoftFloat SoftFloat::acos() const noexcept {
 
 constexpr SoftFloat SoftFloat::sinh() const noexcept {
 	SoftFloat e = exp();
-	return (e - SoftFloat::one() / e) >> 1; // (e - e^-1)/2
+	return (e - e.reciprocal()) >> 1;
 }
-
 constexpr SoftFloat SoftFloat::cosh() const noexcept {
 	SoftFloat e = exp();
-	return (e + SoftFloat::one() / e) >> 1;
+	return (e + e.reciprocal()) >> 1;
 }
-
 constexpr SoftFloat SoftFloat::tanh() const noexcept {
-	SoftFloat e2 = (*this << 1).exp(); // e^(2x)
-	return (e2 - SoftFloat::one()) / (e2 + SoftFloat::one());
+	SoftFloat e2 = (*this << 1).exp();
+	SoftFloat num = e2 - SoftFloat::one();
+	SoftFloat den = e2 + SoftFloat::one();
+	return num * den.reciprocal();             // 1 div → 1 recip + 1 mul
 }
-
 
 #if 1
 
@@ -1958,61 +1982,68 @@ constexpr SF_HOT SoftFloat SoftFloat::inv_sqrt() const noexcept
 	int32_t y_q29 = v0 + (((v1 - v0) * static_cast<int32_t>(frac8)) >> 8);
 
 	// --- Step 2: NEWTON ITERATION FIRST. ALWAYS.
-	int32_t yy;
+	int32_t yy, ay, r_q29;
+	
 #if defined(__arm__)
-	{
+	if (!SF_IS_CONSTEVAL()) {
 		int32_t lo, hi;
 		__asm__("smull %0, %1, %2, %3"
-			: "=&r"(lo), "=&r"(hi)
-			: "r"(y_q29), "r"(y_q29));
+			: "=&r"(lo),
+			"=&r"(hi)
+			: "r"(y_q29),
+			"r"(y_q29));
 		yy = (hi << 3) | (static_cast<uint32_t>(lo) >> 29);
 	}
-#else
-	yy = static_cast<int32_t>(
-		(static_cast<int64_t>(y_q29) * y_q29) >> 29);
+	else
 #endif
+		yy = static_cast<int32_t>(
+			(static_cast<int64_t>(y_q29) * y_q29) >> 29);
 
-	int32_t ay;
 #if defined(__arm__)
-	{
+	if (!SF_IS_CONSTEVAL()) {
 		int32_t lo, hi;
 		__asm__("smull %0, %1, %2, %3"
-			: "=&r"(lo), "=&r"(hi)
-			: "r"(static_cast<int32_t>(a)), "r"(yy));
+			: "=&r"(lo),
+			"=&r"(hi)
+			: "r"(static_cast<int32_t>(a)),
+			"r"(yy));
 		ay = (hi << 3) | (static_cast<uint32_t>(lo) >> 29);
 	}
-#else
-	ay = static_cast<int32_t>(
-		(static_cast<int64_t>(a) * yy) >> 29);
+	else
 #endif
+		ay = static_cast<int32_t>(
+			(static_cast<int64_t>(a) * yy) >> 29);
 
-	const int32_t r_q29 = 0x30000000 - (ay >> 1);
+	r_q29 = 0x30000000 - (ay >> 1);
 
 #if defined(__arm__)
-	{
+	if (!SF_IS_CONSTEVAL()) {
 		int32_t lo, hi;
 		__asm__("smull %0, %1, %2, %3"
-			: "=&r"(lo), "=&r"(hi)
-			: "r"(y_q29), "r"(r_q29));
+			: "=&r"(lo),
+			"=&r"(hi)
+			: "r"(y_q29),
+			"r"(r_q29));
 		y_q29 = (hi << 3) | (static_cast<uint32_t>(lo) >> 29);
 	}
-#else
-	y_q29 = static_cast<int32_t>(
-		(static_cast<int64_t>(y_q29) * r_q29) >> 29);
+	else
 #endif
+		y_q29 = static_cast<int32_t>(
+			(static_cast<int64_t>(y_q29) * r_q29) >> 29);
 
 	// --- Step 3: NOW apply odd exponent correction. AFTER Newton.
 	if (E_raw & 1) {
 #if defined(__arm__)
-		int32_t lo, hi;
-		__asm__("smull %0, %1, %2, %3"
-			: "=&r"(lo), "=&r"(hi)
-			: "r"(y_q29), "r"(0x16A09E66));
-		y_q29 = (hi << 3) | (static_cast<uint32_t>(lo) >> 29);
-#else
-		y_q29 = static_cast<int32_t>(
-			(static_cast<int64_t>(y_q29) * 0x16A09E66LL) >> 29);
+		if (!SF_IS_CONSTEVAL()) {
+			int32_t lo, hi;
+			__asm__("smull %0, %1, %2, %3"
+				: "=&r"(lo), "=&r"(hi)
+				: "r"(y_q29), "r"(0x16A09E66));
+			y_q29 = (hi << 3) | (static_cast<uint32_t>(lo) >> 29);
+		}
+		else
 #endif
+			y_q29 = static_cast<int32_t>( (static_cast<int64_t>(y_q29) * 0x16A09E66LL) >> 29);
 	}
 
 	// --- Step 4: Normalise
@@ -2823,17 +2854,72 @@ constexpr SoftFloat SoftFloat::log10() const noexcept {
 	return log2() * LOG10_2;
 }
 
+// ------------------------------------------------------------------
+// pow — fixed integer fast path
+// ------------------------------------------------------------------
 constexpr SoftFloat SoftFloat::pow(SoftFloat y) const noexcept {
 	if (mantissa == 0) return y.mantissa == 0 ? one() : zero();
 	if (y.mantissa == 0) return one();
+
+	// --- 1. Practically-free guards for common algebraic exponents ---
+	if (y == SoftFloat::two())          { SoftFloat t = *this; return t * t; }
+	if (y == SoftFloat::three())        { SoftFloat t = *this; return t * t * t; }
+	if (y == SoftFloat::four())         { SoftFloat t = *this; t = t * t; return t * t; }
+	if (y == SoftFloat::neg_one())      return reciprocal();
+	if (y == half())                    return sqrt();
+	if (y == -half())                   return inv_sqrt();
+
+	// --- 2. Zero-cost integer detection --------------------------------
+	// A normalised SoftFloat is an integer iff the lower (-exponent) bits
+	// of abs(mantissa) are all zero.  No temporaries, no CLZ.
+	int32_t n = 0;
+	bool is_int = false;
+	if (y.exponent < 0) {
+		int32_t shift = -y.exponent; // 1 … 30 for sensible numbers
+		if (shift <= 30) {
+			uint32_t a = sf_abs32(y.mantissa);
+			uint32_t mask = (1u << shift) - 1u;
+			if ((a & mask) == 0u) {
+				is_int = true;
+				n = static_cast<int32_t>(a >> shift);
+				if (y.mantissa < 0) n = -n;
+			}
+		}
+	}
+	// (exponent >= 0 means value >= 2^29; too large for a loop, fall through)
+
+	if (is_int) {
+		if (n == 0) return one();
+		if (n == 1) return *this;
+
+		bool neg = n < 0;
+		uint32_t un = neg ? static_cast<uint32_t>(-(static_cast<int64_t>(n)))
+		                  : static_cast<uint32_t>(n);
+
+		// --- 3. Unrolled hot small integers (covers 90 % of real cases) ---
+		if (un == 2) { SoftFloat t = *this; return t * t; }
+		if (un == 3) { SoftFloat t = *this; return t * t * t; }
+		if (un == 4) { SoftFloat t = *this; t = t * t; return t * t; }
+
+		// --- 4. Generic exponentiation by squaring -----------------------
+		SoftFloat result = one();
+		SoftFloat base   = *this;
+		for (; un; un >>= 1) {
+			if (un & 1u) result *= base;
+			base *= base;
+		}
+		return neg ? result.reciprocal() : result;
+	}
+
+	if (is_negative()) return zero();              // non-integer power of negative
 	return (y * log()).exp();
 }
 
-#if 0
+#if 1
 constexpr SF_HOT SoftFloat hypot(SoftFloat x, SoftFloat y) noexcept {
 	x = x.abs(); y = y.abs();
 	if (x < y) { SoftFloat t = x; x = y; y = t; }
-	if (x.mantissa == 0) return zero();
+	if (x.mantissa == 0) return SoftFloat::zero();
     
 	int32_t e = x.exponent;
 	// Direct scaled mantissas — skip SoftFloat construction overhead:
@@ -3009,9 +3095,9 @@ constexpr SoftFloatPair SoftFloat::modf() const noexcept {
 }
 
 constexpr SoftFloat SoftFloat::copysign(SoftFloat sign) const noexcept {
-	if (sign.is_negative() == is_negative()) return *this;
-	return -*this;
+	return from_raw((mantissa ^ sign.mantissa) >= 0 ? mantissa : -mantissa, exponent);
 }
+
 constexpr SoftFloat SoftFloat::fmod(SoftFloat y) const noexcept {
 	if (y.mantissa == 0) return *this; // should be NaN, but return 0
 	SoftFloat n = (*this / y).trunc();
