@@ -2071,53 +2071,84 @@ constexpr SF_HOT SoftFloat SoftFloat::inv_sqrt() const noexcept
 {
 	if (UNLIKELY(mantissa <= 0)) return zero();
 
-	int32_t  E_raw = exponent + 29;
-	uint32_t a = static_cast<uint32_t>(mantissa);
-	uint32_t offset = a - 0x20000000u;
-	uint32_t idx = offset >> 21;
-	uint32_t frac8 = (offset >> 13) & 0xFFu;
+	const int32_t  E_raw = exponent + 29;
+	const uint32_t a = static_cast<uint32_t>(mantissa);
 
-	// Uniform Q29 table lookup — no special case for idx=0
-	int32_t v0 = INV_SQRT_Q29[idx];
-	int32_t v1 = INV_SQRT_Q29[idx + 1];
-	int32_t delta = v1 - v0;
-	int32_t y_q29 = v0 + ((delta * static_cast<int32_t>(frac8)) >> 8);
+	// --- Step 1: initial guess from table + linear interpolation
+	const uint32_t offset = a - 0x20000000u;
+	const uint32_t idx = offset >> 21;
+	const uint32_t frac8 = (offset >> 13) & 0xFFu;
 
-	// Odd exponent adjustment: multiply by 1/sqrt(2) in Q29
+	const int32_t v0 = INV_SQRT_Q29[idx];
+	const int32_t v1 = INV_SQRT_Q29[idx + 1];
+	int32_t y_q29 = v0 + (((v1 - v0) * static_cast<int32_t>(frac8)) >> 8);
+
+	// --- Step 2: NEWTON ITERATION FIRST. ALWAYS.
+	int32_t yy;
+#if defined(__arm__)
+	{
+		int32_t lo, hi;
+		__asm__("smull %0, %1, %2, %3"
+			: "=&r"(lo), "=&r"(hi)
+			: "r"(y_q29), "r"(y_q29));
+		yy = (hi << 3) | (static_cast<uint32_t>(lo) >> 29);
+	}
+#else
+	yy = static_cast<int32_t>(
+		(static_cast<int64_t>(y_q29) * y_q29) >> 29);
+#endif
+
+	int32_t ay;
+#if defined(__arm__)
+	{
+		int32_t lo, hi;
+		__asm__("smull %0, %1, %2, %3"
+			: "=&r"(lo), "=&r"(hi)
+			: "r"(static_cast<int32_t>(a)), "r"(yy));
+		ay = (hi << 3) | (static_cast<uint32_t>(lo) >> 29);
+	}
+#else
+	ay = static_cast<int32_t>(
+		(static_cast<int64_t>(a) * yy) >> 29);
+#endif
+
+	const int32_t r_q29 = 0x30000000 - (ay >> 1);
+
+#if defined(__arm__)
+	{
+		int32_t lo, hi;
+		__asm__("smull %0, %1, %2, %3"
+			: "=&r"(lo), "=&r"(hi)
+			: "r"(y_q29), "r"(r_q29));
+		y_q29 = (hi << 3) | (static_cast<uint32_t>(lo) >> 29);
+	}
+#else
+	y_q29 = static_cast<int32_t>(
+		(static_cast<int64_t>(y_q29) * r_q29) >> 29);
+#endif
+
+	// --- Step 3: NOW apply odd exponent correction. AFTER Newton.
 	if (E_raw & 1) {
 #if defined(__arm__)
-		if (!SF_IS_CONSTEVAL()) {
-			int32_t lo, hi;
-			__asm__("smull %0, %1, %2, %3"
-				: "=&r"(lo), "=&r"(hi)
-				: "r"(y_q29), "r"(0x16A09E66));
-			// Q29 * Q29 >> 29 = Q29
-			y_q29 = (hi << 3) | (static_cast<uint32_t>(lo) >> 29);
-		}
-		else
+		int32_t lo, hi;
+		__asm__("smull %0, %1, %2, %3"
+			: "=&r"(lo), "=&r"(hi)
+			: "r"(y_q29), "r"(0x16A09E66));
+		y_q29 = (hi << 3) | (static_cast<uint32_t>(lo) >> 29);
+#else
+		y_q29 = static_cast<int32_t>(
+			(static_cast<int64_t>(y_q29) * 0x16A09E66LL) >> 29);
 #endif
-		{
-			y_q29 = static_cast<int32_t>(
-				(static_cast<int64_t>(y_q29) * 0x16A09E66LL) >> 29);
-		}
 	}
 
-	// result exponent: y represents mantissa/2^29, scaled by 2^(-(E_raw/2))
-	int32_t result_e = -29 - (E_raw >> 1);
-	sf_normalise_fast(y_q29, result_e);
-	SoftFloat y = from_raw(y_q29, result_e);
+	// --- Step 4: Normalise
+	const int32_t carry = static_cast<uint32_t>(y_q29) >> 29;
+	y_q29 <<= 1;
+	int32_t result_e = -29 - (E_raw >> 1) - 1 + carry;
 
-	// Single Newton-Raphson step: y *= (1.5 - 0.5*x * y^2)
-	// Table gives ~20-bit accuracy; one step yields ~40 bits >> 30 needed.
-	{
-		constexpr SoftFloat k15 = from_raw(0x30000000, -29); // 1.5
-		SoftFloat hx = from_raw(mantissa, exponent - 1);      // x/2
-		SoftFloat y2 = y * y;
-		SoftFloat step = fused_mul_sub(k15, hx, y2);
-		y *= step;
-	}
+	result_e = sf_sat_exp(result_e);
 
-	return y;
+	return from_raw(y_q29, result_e);
 }
 
 constexpr SF_HOT SoftFloat SoftFloat::sqrt() const noexcept
