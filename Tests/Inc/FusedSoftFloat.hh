@@ -512,14 +512,9 @@ public:
 	friend constexpr SF_HOT SF_INLINE sf_mul_expr operator*(float     a, SoftFloat b) noexcept;
 	friend constexpr SF_HOT SF_INLINE sf_mul_expr operator*(int32_t   a, SoftFloat b) noexcept;
 
-	// ------------------------------------------------------------------
-	// Add — constexpr, 32-bit only (no overflow possible)
-	//
-	// After alignment: larger operand abs in [2^29,2^30), smaller <= 2^29.
-	// Worst-case same-sign sum: (2^30-1)+2^29 < 2^31  =>  no overflow.
-	// ------------------------------------------------------------------
 	[[nodiscard]] constexpr SF_HOT SF_INLINE SF_FLATTEN
-		friend SoftFloat operator+(SoftFloat a, SoftFloat b) noexcept {
+	friend SoftFloat operator+(SoftFloat a, SoftFloat b) noexcept
+	{
 		if (UNLIKELY(!a.mantissa)) return b;
 		if (UNLIKELY(!b.mantissa)) return a;
 
@@ -533,18 +528,27 @@ public:
 			rm = a.mantissa + b.mantissa;
 			re = a.exponent;
 			if (UNLIKELY(rm == 0)) return zero();
-			
-			// Detect overflow into bit30 without sf_abs32:
-			// (rm ^ (rm>>31)) gives |rm|-1 for negative, |rm| for positive.
-			// Bit30 set means |rm| >= 2^30, i.e. overflow by 1 bit.
-			uint32_t ov = static_cast<uint32_t>(rm ^ (rm >> 31)) >> 30;
-			rm >>= static_cast<int>(ov);
-			re += static_cast<int32_t>(ov);
-			re = sf_sat_exp(re);
+
+			uint32_t ab = sf_abs32(rm);
+
+			// Hot path: already normalised (bit29 set, bit30 clear)
+			if (LIKELY((ab & 0x60000000u) == 0x20000000u)) {
+				return from_raw(rm, re);          // re is still in [-128,127]
+			}
+
+			// One-bit overflow into bit30 (same-sign addition)
+			if (ab & 0x40000000u) {
+				rm >>= 1;
+				if (UNLIKELY(++re > 127)) re = 127; // saturate only when needed
+				return from_raw(rm, re);
+			}
+
+			// Cancellation: full renormalise (rare)
+			sf_normalise_fast(rm, re);
 			return from_raw(rm, re);
 		}
 
-		// Unequal exponents: align smaller operand with arithmetic shift.
+		// Unequal exponents: align the smaller operand
 		if (d > 0) {
 			rm = a.mantissa + (b.mantissa >> d);
 			re = a.exponent;
@@ -554,7 +558,19 @@ public:
 			re = b.exponent;
 		}
 
-		return sf_finish_addsub(rm, re);
+		if (UNLIKELY(rm == 0)) return zero();
+
+		uint32_t ab = sf_abs32(rm);
+		if (LIKELY((ab & 0x60000000u) == 0x20000000u)) {
+			return from_raw(rm, re);
+		}
+		if (ab & 0x40000000u) {
+			rm >>= 1;
+			if (UNLIKELY(++re > 127)) re = 127;
+			return from_raw(rm, re);
+		}
+		sf_normalise_fast(rm, re);
+		return from_raw(rm, re);
 	}
 	[[nodiscard]] constexpr SF_HOT SF_INLINE SF_FLATTEN 
 		friend SoftFloat operator+(SoftFloat a, float b) noexcept {
