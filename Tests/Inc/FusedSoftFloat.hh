@@ -1133,71 +1133,52 @@ private:
 	// Both inputs have abs in [2^29,2^30). Product in [2^58,2^60).
 	// >> 29 gives [2^29,2^31) => at most one bit of adjustment.
 	[[nodiscard]] static constexpr SF_INLINE SF_FLATTEN
-	SoftFloat mul_plain(SoftFloat a, SoftFloat b) noexcept {
+	SoftFloat mul_plain(SoftFloat a, SoftFloat b) noexcept
+	{
 		if (UNLIKELY(!a.mantissa || !b.mantissa)) return zero();
 
 		int32_t re = a.exponent + b.exponent + 29;
 
 #if defined(__arm__)
 		if (!SF_IS_CONSTEVAL()) {
-			// ── Cortex-M3 fast path ────────────────────────────────────────
-			//
-			// SMULL gives the full 64-bit signed product in {lo_r, hi_r}.
-			//
-			// rm = prod >> 29 (arithmetic):
-			//   = (hi_r << 3) | (lo_r >> 29)
-			//
-			// Overflow detection:
-			//   We need abs(rm) >= 2^30, i.e. bit30 set in abs(rm).
-			//   abs(rm) ≈ rm ^ (rm asr 31)  [exact for positive; abs(rm)-1 for negative;
-			//                                 bit30 is correct in both cases]
-			//   TST that against 0x40000000.
-			//
-			// Cycle count (Cortex-M3 in-order):
-			//   SMULL          : 3–5 cy
-			//   MOV + ORR      : 2 cy  (depend on SMULL outputs)
-			//   EOR + TST      : 2 cy  (depend on rm)
-			//   IT NE + ASRNE  : 1 cy  (conditional, no flush)
-			//   IT NE + ADDNE  : 1 cy
-			//   Total          : ~9–11 cy  (vs ~12+ with branch)
-
 			int32_t rm, lo_r, hi_r, tmp;
 
 			__asm__(
-			    // 64-bit signed multiply
+			    // 64-bit signed multiply  (3–5 cycles, result in {lo,hi})
 			    "smull  %[lo], %[hi], %[am], %[bm]         \n\t"
 
-			    // rm = arithmetic (prod >> 29)
-			    //    = (hi_r << 3) | (lo_r >>> 29)
+			    // rm = prod >> 29  (arithmetic)  = (hi<<3) | (lo>>29)
 			    "mov    %[rm],  %[hi], lsl #3               \n\t"
 			    "orr    %[rm],  %[rm], %[lo], lsr #29       \n\t"
 
-			    // Overflow detection: abs(rm) >= 2^30?
-			    // tmp = rm ^ (rm asr 31)  — bit30 set iff abs(rm) >= 2^30
-			    "eor    %[tmp], %[rm], %[rm], asr #31       \n\t"
-			    "tst    %[tmp], #0x40000000                  \n\t"
+			    // abs(rm)  —  ASR+EOR+SUB  (correct for 0xC0000000)
+			    "asrs   %[tp], %[rm], #31                   \n\t"
+			    "eors   %[tp], %[rm], %[tp]                 \n\t"
+			    "subs   %[tp], %[tp], %[rm], asr #31        \n\t"
 
-			    // Branch-free correction: if bit30 set, rm >>= 1 and re += 1
-			    "it     ne                                  \n\t"
-			    "asrne  %[rm],  %[rm], #1                   \n\t"
-			    "it     ne                                  \n\t"
-			    "addne  %[re],  %[re], #1                   \n\t"
+			    // If abs(rm) >= 2^30 : rm >>= 1, re += 1
+			    "cmp    %[tp], #0x40000000                  \n\t"
+			    "itt    cs                                  \n\t"
+			    "asrcs  %[rm], %[rm], #1                    \n\t"
+			    "addcs  %[re], %[re], #1                    \n\t"
+
+			    // Optional: saturate exponent (1 cycle, uncomment if you need safety)
+			    // "ssat   %[re], #8, %[re]                    \n\t"
 
 			    : [rm]  "=&r" (rm),
 				[lo]  "=&r" (lo_r),
 				[hi]  "=&r" (hi_r),
-				[tmp] "=&r" (tmp),
+				[tp]  "=&r" (tmp),
 				[re]  "+r"  (re)
 			  : [am]  "r"  (a.mantissa),
 				[bm]  "r"  (b.mantissa)
 			  : "cc");
 
-			re = sf_sat_exp_fast(re);
 			return from_raw(rm, re);
 		}
 #endif
 
-		// ── Portable / consteval path ─────────────────────────────────────────
+		    // ── Portable / consteval path ─────────────────────────────────────────
 		{
 			int64_t  prod  = static_cast<int64_t>(a.mantissa)
 			               * static_cast<int64_t>(b.mantissa);
@@ -1208,12 +1189,10 @@ private:
 				rm >>= 1;
 				re  += 1;
 			}
-
-			re = sf_sat_exp_fast(re);
 			return from_raw(rm, re);
 		}
 	}
-
+	
 	// from_float — parse IEEE 754 single, constexpr via std::bit_cast
 	constexpr SF_HOT void from_float(float f) noexcept {
 		uint32_t bits = sf_bitcast<uint32_t>(f);
@@ -1301,7 +1280,7 @@ struct sf_mul_expr {
 // =========================================================================
 // SoftFloat proxy constructor (defined here so sf_mul_expr is complete)
 // =========================================================================
-constexpr SF_HOT SoftFloat::SoftFloat(const sf_mul_expr& m) noexcept {
+constexpr SF_HOT SF_INLINE SoftFloat::SoftFloat(const sf_mul_expr& m) noexcept {
 	SoftFloat v = m.eval();
 	mantissa = v.mantissa;
 	exponent = v.exponent;
