@@ -609,7 +609,7 @@ public:
 	// ------------------------------------------------------------------
 	[[nodiscard]] constexpr SF_HOT SF_INLINE SF_FLATTEN
 		friend SoftFloat operator-(SoftFloat a, SoftFloat b) noexcept {
-#
+
 		if (UNLIKELY(!b.mantissa)) return a;
 		if (UNLIKELY(!a.mantissa)) return -b;
 
@@ -2279,418 +2279,125 @@ constexpr SF_HOT SoftFloat SoftFloat::sqrt() const noexcept {
 
 #endif
 
-
 #if 1
-// ---------------------------------------------------------------------
-// ATAN2 – table‑based, linear interpolation (256 entries)
-// ---------------------------------------------------------------------
-static constexpr int32_t ATAN_MANT[257] = {
-	0x00000000, 0x3FFFEA00, 0x3FFFAA80, 0x2FFF7000, 0x3FFEAA80, 0x27FEB2A0, 0x2FFDC020, 0x37FC6DA0,
-	0x3FFAAB60, 0x23FC34B0, 0x27FACBE0, 0x2BF91340, 0x2FF70300, 0x33F49330, 0x37F1BBE0, 0x3BEE7530,
-	0x3FEAB760, 0x21F33D48, 0x23F0DB78, 0x25EE3260, 0x27EB3E18, 0x29E7FAC8, 0x2BE46498, 0x2DE077B8,
-	0x2FDC3048, 0x31D78A88, 0x33D282A0, 0x35CD14E0, 0x37C73D78, 0x39C0F8B8, 0x3BBA42E0, 0x3DB31840,
-	0x3FAB7530, 0x20D1AB08, 0x21CD5B98, 0x22C8CA80, 0x23C3F5F4, 0x24BEDC2C, 0x25B97B64, 0x26B3D1D8,
-	0x27ADDDD0, 0x28A79D8C, 0x29A10F50, 0x2A9A3174, 0x2B93023C, 0x2C8B7FFC, 0x2D83A910, 0x2E7B7BD0,
-	0x2F72F694, 0x306A17C4, 0x3160DDC4, 0x325746F8, 0x334D51D0, 0x3442FCC0, 0x35384634, 0x362D2CAC,
-	0x3721AEA4, 0x3815CA98, 0x39097F14, 0x39FCCA9C, 0x3AEFABBC, 0x3BE2210C, 0x3CD4291C, 0x3DC5C288,
-	0x3EB6EBF0, 0x3FA7A3F8, 0x204BF4A2, 0x20C3DD40, 0x213B8B2E, 0x21B2FDCA, 0x222A346C, 0x22A12E74,
-	0x2317EB46, 0x238E6A42, 0x2404AACE, 0x247AAC56, 0x24F06E40, 0x2565EFFA, 0x25DB30F4, 0x2650309E,
-	0x26C4EE6E, 0x273969D6, 0x27ADA252, 0x2821975A, 0x2895486C, 0x2908B508, 0x297BDCB0, 0x29EEBEE6,
-	0x2A615B32, 0x2AD3B11C, 0x2B45C02E, 0x2BB787F6, 0x2C290806, 0x2C9A3FEC, 0x2D0B2F3E, 0x2D7BD592,
-	0x2DEC3282, 0x2E5C45AA, 0x2ECC0EA4, 0x2F3B8D12, 0x2FAAC096, 0x3019A8D4, 0x30884570, 0x30F69618,
-	0x31649A72, 0x31D2522C, 0x323FBCF8, 0x32ACDA86, 0x3319AA8A, 0x33862CB8, 0x33F260CC, 0x345E467C,
-	0x34C9DD86, 0x353525AA, 0x35A01EA8, 0x360AC840, 0x3675223A, 0x36DF2C5C, 0x3748E66E, 0x37B2503C,
-	0x381B6992, 0x3884323E, 0x38ECAA14, 0x3954D0E4, 0x39BCA686, 0x3A242ACC, 0x3A8B5D92, 0x3AF23EB4,
-	0x3B58CE0A, 0x3BBF0B76, 0x3C24F6D6, 0x3C8A900C, 0x3CEFD6FE, 0x3D54CB8E, 0x3DB96DA8, 0x3E1DBD30,
-	0x3E81BA16, 0x3EE56442, 0x3F48BBA6, 0x3FABC02E, 0x200738E7, 0x2038683D, 0x20696E12, 0x209A4A62,
-	0x20CAFD29, 0x20FB8664, 0x212BE610, 0x215C1C2C, 0x218C28B6, 0x21BC0BAF, 0x21EBC516, 0x221B54EE,
-	0x224ABB37, 0x2279F7F6, 0x22A90B2C, 0x22D7F4DE, 0x2306B511, 0x23354BCA, 0x2363B90F, 0x2391FCE6,
-	0x23C01757, 0x23EE086A, 0x241BD027, 0x24496E98, 0x2476E3C5, 0x24A42FBA, 0x24D15280, 0x24FE4C24,
-	0x252B1CB2, 0x2557C435, 0x258442BC, 0x25B09852, 0x25DCC508, 0x2608C8EA, 0x2634A409, 0x26605673,
-	0x268BE039, 0x26B7416C, 0x26E27A1B, 0x270D8A5A, 0x27387239, 0x276331CB, 0x278DC923, 0x27B83854,
-	0x27E27F71, 0x280C9E8E, 0x283695C0, 0x2860651C, 0x288A0CB6, 0x28B38CA5, 0x28DCE4FD, 0x290615D6,
-	0x292F1F46, 0x29580163, 0x2980BC45, 0x29A95004, 0x29D1BCB7, 0x29FA0276, 0x2A22215B, 0x2A4A197D,
-	0x2A71EAF7, 0x2A9995E0, 0x2AC11A53, 0x2AE8786A, 0x2B0FB03E, 0x2B36C1EB, 0x2B5DAD8B, 0x2B847338,
-	0x2BAB130E, 0x2BD18D28, 0x2BF7E1A1, 0x2C1E1096, 0x2C441A22, 0x2C69FE62, 0x2C8FBD71, 0x2CB5576D,
-	0x2CDACC72, 0x2D001C9C, 0x2D25480A, 0x2D4A4ED8, 0x2D6F3124, 0x2D93EF0A, 0x2DB888AA, 0x2DDCFE20,
-	0x2E014F8A, 0x2E257D08, 0x2E4986B6, 0x2E6D6CB4, 0x2E912F1F, 0x2EB4CE17, 0x2ED849B9, 0x2EFBA225,
-	0x2F1ED77A, 0x2F41E9D7, 0x2F64D95A, 0x2F87A623, 0x2FAA5051, 0x2FCCD803, 0x2FEF3D59, 0x30118072,
-	0x3033A16E, 0x3055A06C, 0x30777D8B, 0x309938EC, 0x30BAD2AE, 0x30DC4AF1, 0x30FDA1D5, 0x311ED77A,
-	0x313FEBFE, 0x3160DF83, 0x3181B228, 0x31A2640D, 0x31C2F553, 0x31E36618, 0x3203B67D, 0x3223E6A3,
-	// ---- new entry for atan(1) = π/4 ----
-	0x3243F6A9  // = 843314857
-};
-
-static constexpr int8_t ATAN_EXP[257] = {
-	   0,  -38,  -37,  -36,  -36,  -35,  -35,  -35,  -35,  -34,  -34,  -34,  -34,  -34,  -34,  -34,
-	 -34,  -33,  -33,  -33,  -33,  -33,  -33,  -33,  -33,  -33,  -33,  -33,  -33,  -33,  -33,  -33,
-	 -33,  -32,  -32,  -32,  -32,  -32,  -32,  -32,  -32,  -32,  -32,  -32,  -32,  -32,  -32,  -32,
-	 -32,  -32,  -32,  -32,  -32,  -32,  -32,  -32,  -32,  -32,  -32,  -32,  -32,  -32,  -32,  -32,
-	 -32,  -32,  -31,  -31,  -31,  -31,  -31,  -31,  -31,  -31,  -31,  -31,  -31,  -31,  -31,  -31,
-	 -31,  -31,  -31,  -31,  -31,  -31,  -31,  -31,  -31,  -31,  -31,  -31,  -31,  -31,  -31,  -31,
-	 -31,  -31,  -31,  -31,  -31,  -31,  -31,  -31,  -31,  -31,  -31,  -31,  -31,  -31,  -31,  -31,
-	 -31,  -31,  -31,  -31,  -31,  -31,  -31,  -31,  -31,  -31,  -31,  -31,  -31,  -31,  -31,  -31,
-	 -31,  -31,  -31,  -31,  -31,  -31,  -31,  -31,  -31,  -31,  -31,  -31,  -30,  -30,  -30,  -30,
-	 -30,  -30,  -30,  -30,  -30,  -30,  -30,  -30,  -30,  -30,  -30,  -30,  -30,  -30,  -30,  -30,
-	 -30,  -30,  -30,  -30,  -30,  -30,  -30,  -30,  -30,  -30,  -30,  -30,  -30,  -30,  -30,  -30,
-	 -30,  -30,  -30,  -30,  -30,  -30,  -30,  -30,  -30,  -30,  -30,  -30,  -30,  -30,  -30,  -30,
-	 -30,  -30,  -30,  -30,  -30,  -30,  -30,  -30,  -30,  -30,  -30,  -30,  -30,  -30,  -30,  -30,
-	 -30,  -30,  -30,  -30,  -30,  -30,  -30,  -30,  -30,  -30,  -30,  -30,  -30,  -30,  -30,  -30,
-	 -30,  -30,  -30,  -30,  -30,  -30,  -30,  -30,  -30,  -30,  -30,  -30,  -30,  -30,  -30,  -30,
-	 -30,  -30,  -30,  -30,  -30,  -30,  -30,  -30,  -30,  -30,  -30,  -30,  -30,  -30,  -30,  -30,
-	 // ---- new entry for atan(1) = π/4 ----
-	 -30
+static constexpr int32_t ATAN_TAB_Q29[257] = {
+			 0,    2097141,    4194219,    6291168,    8387925,   10484427,   12580609,   14676407,
+	  16771758,   18866598,   20960863,   23054490,   25147416,   27239578,   29330911,   31421354,
+	  33510843,   35599317,   37686712,   39772966,   41858018,   43941805,   46024266,   48105340,
+	  50184965,   52263081,   54339626,   56414542,   58487768,   60559244,   62628910,   64696708,
+	  66762579,   68826465,   70888307,   72948048,   75005631,   77060998,   79114093,   81164859,
+	  83213242,   85259186,   87302634,   89343535,   91381832,   93417472,   95450402,   97480570,
+	  99507923,  101532409,  103553977,  105572575,  107588154,  109600664,  111610055,  113616278,
+	 115619285,  117619027,  119615459,  121608532,  123598200,  125584418,  127567140,  129546321,
+	 131521918,  133493887,  135462185,  137426768,  139387596,  141344627,  143297819,  145247133,
+	 147192530,  149133969,  151071412,  153004822,  154934160,  156859391,  158780477,  160697384,
+	 162610076,  164518518,  166422677,  168322519,  170218011,  172109122,  173995820,  175878074,
+	 177755853,  179629127,  181497868,  183362046,  185221634,  187076603,  188926928,  190772581,
+	 192613537,  194449771,  196281257,  198107973,  199929894,  201746997,  203559260,  205366662,
+	 207169181,  208966795,  210759486,  212547234,  214330019,  216107822,  217880627,  219648415,
+	 221411170,  223168875,  224921514,  226669072,  228411535,  230148887,  231881116,  233608207,
+	 235330149,  237046928,  238758533,  240464953,  242166178,  243862195,  245552997,  247238573,
+	 248918915,  250594014,  252263862,  253928451,  255587776,  257241828,  258890602,  260534092,
+	 262172294,  263805201,  265432810,  267055116,  268672116,  270283807,  271890185,  273491249,
+	 275086997,  276677426,  278262536,  279842326,  281416795,  282985944,  284549771,  286108279,
+	 287661468,  289209339,  290751894,  292289135,  293821065,  295347685,  296869000,  298385011,
+	 299895724,  301401141,  302901268,  304396108,  305885667,  307369949,  308848960,  310322706,
+	 311791193,  313254427,  314712414,  316165161,  317612676,  319054965,  320492037,  321923898,
+	 323350557,  324772022,  326188302,  327599405,  329005341,  330406118,  331801746,  333192234,
+	 334577593,  335957831,  337332960,  338702990,  340067931,  341427795,  342782591,  344132331,
+	 345477027,  346816690,  348151331,  349480962,  350805596,  352125243,  353439918,  354749631,
+	 356054396,  357354224,  358649130,  359939125,  361224223,  362504438,  363779782,  365050268,
+	 366315911,  367576724,  368832721,  370083915,  371330321,  372571953,  373808825,  375040951,
+	 376268345,  377491022,  378708997,  379922284,  381130898,  382334853,  383534165,  384728848,
+	 385918917,  387104388,  388285275,  389461594,  390633360,  391800588,  392963293,  394121491,
+	 395275197,  396424428,  397569197,  398709522,  399845417,  400976898,  402103981,  403226681,
+	 404345015,  405458998,  406568646,  407673974,  408774999,  409871737,  410964203,  412052413,
+	 413136383,  414216130,  415291668,  416363015,  417430186,  418493196,  419552063,  420606802,
+	 421657428
 };
 
 constexpr SF_HOT SoftFloat atan2(SoftFloat y, SoftFloat x) noexcept {
+
+	// Q29 constants - these match SoftFloat::half_pi() and pi() mantissas exactly
+	constexpr int32_t HALF_PI_Q29 = 843314857;   // π/2 * 2^29
+	constexpr int32_t PI_Q29 = 1686629713;  // π * 2^29
+
+	// Handle origin
 	if (x.is_zero() && y.is_zero()) return SoftFloat::zero();
 
-	bool x_neg = x.is_negative();
-	bool y_neg = y.is_negative();
+	// Capture signs and take absolute values
+	const bool x_neg = x.is_negative();
+	const bool y_neg = y.is_negative();
 	x = x.abs();
 	y = y.abs();
 
-	// Ensure y <= x (octant reduction), record if we swapped
-	bool swap = y > x;
+	// Ensure ratio <= 1 by swapping if needed
+	const bool swap = y > x;
 	if (swap) { SoftFloat t = x; x = y; y = t; }
 
-	// ----------------------------------------------------------------
-	// Compute t = y/x as a Q8.24 fixed-point integer without division.
-	//
-	// Both x and y are normalised: mantissas in [2^29, 2^30),
-	// exponents e_x and e_y arbitrary (but y <= x so result in [0,1]).
-	//
-	// t_real = y_m * 2^e_y / (x_m * 2^e_x)
-	//        = (y_m / x_m) * 2^(e_y - e_x)
-	//
-	// y_m / x_m is in (0, 1] since y <= x after swap.
-	// We want t_Q24 = floor(t_real * 2^24) as a 32-bit integer.
-	//
-	// t_Q24 = floor( y_m * 2^(e_y - e_x) * 2^24 / x_m )
-	//       = floor( y_m * 2^(24 + e_y - e_x) / x_m )
-	//
-	// Let shift = 24 + e_y - e_x.
-	//   y_m in [2^29, 2^30), x_m in [2^29, 2^30).
-	//   After swap, t_real in [0, 1], so shift can be negative (large x)
-	//   or positive.
-	//
-	//   If shift >= 0: numerator = y_m << shift.
-	//     Maximum useful shift: t_Q24 <= 2^24, so y_m << shift <= x_m * 2^24.
-	//     x_m < 2^30, so numerator <= 2^54. Needs uint64_t.
-	//     We cap shift at 30 to avoid absurd shifts (t would be ~2^24 anyway
-	//     since y≈x after swap).
-	//
-	//   If shift < 0: numerator = y_m >> (-shift).
-	//     t_Q24 = floor((y_m >> (-shift)) / x_m).
-	//     If -shift > 29, y_m >> (-shift) == 0 => t_Q24 = 0.
-	//
-	// After obtaining t_Q24 in [0, 2^24]:
-	//   idx      = t_Q24 >> 16          (top 8 bits => table index 0..255)
-	//   frac_Q16 = t_Q24 & 0xFFFF       (bottom 16 bits => interpolation)
-	//
-	// On ARM (runtime): use UDIV for the integer divide.
-	// At consteval:     use portable 64-bit division.
-	// ----------------------------------------------------------------
+	// Compute ratio y/x as Q24 fixed-point (range [0, 1] maps to [0, 0x1000000])
+	uint32_t t_Q24 = 0;
+	if (!x.is_zero() && !y.is_zero()) {
+		const uint32_t x_m = static_cast<uint32_t>(x.mantissa);
+		const uint32_t y_m = static_cast<uint32_t>(y.mantissa);
+		const int32_t exp_diff = y.exponent - x.exponent;
+		const int32_t shift = 24 + exp_diff;
 
-	uint32_t t_Q24;
-
-	if (x.is_zero()) {
-		// y == 0 handled above; x == 0 after swap means y was also 0.
-		// Actually: after swap, x >= y, so x==0 => y==0 => handled already.
-		t_Q24 = 0;
-	}
-	else {
-		uint32_t x_m = static_cast<uint32_t>(x.mantissa); // [2^29, 2^30)
-		uint32_t y_m = static_cast<uint32_t>(y.mantissa); // [0,    2^30)
-		int32_t  exp_diff = y.exponent - x.exponent; // e_y - e_x
-		int32_t  shift = 24 + exp_diff; // we want y_m * 2^shift / x_m
-
-		if (UNLIKELY(y_m == 0)) {
-			t_Q24 = 0;
-		}
-		else if (shift <= -30) {
-			// y is at least 2^30 times smaller than x in exponent; t < 2^-6 => t_Q24 = 0
-			t_Q24 = 0;
-		}
-		else if (shift >= 0) {
-			// Numerator = y_m << shift, needs uint64_t
-			// Cap shift: if shift > 30, t_Q24 would exceed 2^24 (impossible since y<=x),
-			// but guard anyway.
-			uint32_t eff_shift = static_cast<uint32_t>(shift > 30 ? 30 : shift);
-			uint64_t num = static_cast<uint64_t>(y_m) << eff_shift;
-
-			// UDIV: 64-bit numerator / 32-bit denominator.
-			// On ARM Cortex-M3 we must do this as two 32-bit UDIVs
-			// (same Knuth D algorithm as in operator/).
-			// At consteval or on non-ARM, fall through to 64-bit divide.
-			if (SF_IS_CONSTEVAL()) {
-				uint64_t q = num / static_cast<uint64_t>(x_m);
-				t_Q24 = q > 0xFFFFFFu ? 0xFFFFFFu
-				      : static_cast<uint32_t>(q);
+		if (shift > -30) {
+			if (shift < 0) {
+				// Ratio is very small
+				t_Q24 = (y_m >> (-shift)) / x_m;
 			}
 			else {
+				const uint32_t eff_shift = static_cast<uint32_t>(shift > 31 ? 31 : shift);
+				const uint64_t num = static_cast<uint64_t>(y_m) << eff_shift;
+
 #if defined(__arm__)
-				// num < 2^60 (y_m < 2^30, eff_shift <= 30), x_m in [2^29,2^30).
-				// Split 64-bit / 32-bit via Knuth D, two UDIVs.
-				{
-					uint32_t num_hi = static_cast<uint32_t>(num >> 32);
-					uint32_t num_lo = static_cast<uint32_t>(num);
-					uint32_t den    = x_m;
-
-					// If num_hi >= den the true quotient exceeds 2^32; clamp.
-					if (num_hi >= den) {
-						t_Q24 = 0xFFFFFFu; // saturate (y >= x edge)
-					}
-					else {
-						// Knuth D for 64÷32 with num_hi < den:
-						// q_hi = floor(num_hi:num_lo_hi / den) — one UDIV
-						// We split the 32-bit lo word into two 16-bit halves
-						// to stay within 32-bit UDIV on Cortex-M3.
-						//
-						// Standard 2-digit base-2^16 long division:
-						//   Let B = 2^16.
-						//   u = num = num_hi * B^2 + u1 * B + u0
-						//   where u1 = num_lo >> 16, u0 = num_lo & 0xFFFF.
-						//
-						// Digit 1 (high quotient word q1, remainder r1):
-						//   q1*den + r1 = num_hi * B + u1
-						//
-						// Digit 0 (low quotient word q0, remainder r0):
-						//   q0*den + r0 = r1 * B + u0
-						//
-						// Full quotient = q1*B + q0 (64-bit, but we cap at 2^24).
-						uint32_t u1  = num_lo >> 16;
-						uint32_t u0  = num_lo & 0xFFFFu;
-						uint32_t vn1 = den >> 16; // [2^13, 2^14) since den in [2^29,2^30)
-						uint32_t vn0 = den & 0xFFFFu;
-
-						// ── High digit ──────────────────────────────────────
-						// Dividend for digit 1: (num_hi << 16) | u1  [fits uint32_t if num_hi < 2^16]
-						// But num_hi can be up to den-1 < 2^30; num_hi << 16 overflows.
-						// Instead use: q1 = (num_hi * 2^16 + u1) / den.
-						// Rewrite as: q1 = num_hi / (den >> 16) (approx), then correct.
-						// This is exactly Knuth's hat-q: q1_hat = floor((num_hi*B + u1) / den)
-						// using the leading digits.
-						uint32_t q1, rhat1;
-						__asm__(
-						    "udiv %0, %1, %2\n\t"
-						    : "=r"(q1) : "r"(num_hi),
-							"r"(vn1));
-						rhat1 = num_hi - q1 * vn1;
-
-						// Correction: rhat < 0x10000u guard omitted.
-						// vn1 < 2^14 => after one correction rhat1 < 2*vn1 < 2^15,
-						// so rhat1 < 0x10000u is always true — the guard is vacuous.
-						if (q1 >= 0x10000u ||
-						    (uint64_t)q1 * vn0 > ((uint64_t)rhat1 << 16) + u1) {
-							--q1; rhat1 += vn1;
-							if (q1 >= 0x10000u ||
-							    (uint64_t)q1 * vn0 > ((uint64_t)rhat1 << 16) + u1) {
-								--q1;
-							}
-						}
-
-						uint32_t un21 = (num_hi - q1 * vn1) * 0x10000u + u1
-						                - q1 * vn0;
-
-						// ── Low digit ───────────────────────────────────────
-						uint32_t q0, rhat0;
-						__asm__(
-						    "udiv %0, %1, %2\n\t"
-						    : "=r"(q0) : "r"(un21),
-							"r"(vn1));
-						rhat0 = un21 - q0 * vn1;
-
-						if (q0 >= 0x10000u ||
-                        (uint64_t)q0 * vn0 > ((uint64_t)rhat0 << 16) + u0) {
-							--q0; rhat0 += vn1;
-							if (q0 >= 0x10000u ||
-							    (uint64_t)q0 * vn0 > ((uint64_t)rhat0 << 16) + u0) {
-								--q0;
-							}
-						}
-
-						uint64_t q_full = ((uint64_t)q1 << 16) | q0;
-						t_Q24 = q_full > 0xFFFFFFu ? 0xFFFFFFu
-						      : static_cast<uint32_t>(q_full);
-					}
-				}
-#else
-				uint64_t q = num / static_cast<uint64_t>(x_m);
-				t_Q24 = q > 0xFFFFFFu ? 0xFFFFFFu
-				      : static_cast<uint32_t>(q);
-#endif
-			}
-		}
-		else {
-			// shift < 0: right-shift y_m to bring exponents into alignment.
-			// t_Q24 = floor(y_m >> (-shift) / x_m)
-			// -shift is in [1, 29].
-			uint32_t y_shifted = y_m >> static_cast<uint32_t>(-shift);
-			// y_shifted < x_m (since t <= 1 and shift < 0 means y < x),
-			// so quotient fits in 32 bits — single UDIV.
-			if (y_shifted == 0) {
-				t_Q24 = 0;
-			}
-			else {
-				if (SF_IS_CONSTEVAL()) {
-					t_Q24 = y_shifted / x_m; // exact, fits uint32_t
-				}
-				else {
-#if defined(__arm__)
+				if (!SF_IS_CONSTEVAL() && (num >> 32) == 0) {
 					uint32_t q;
-					__asm__(
-					    "udiv %0, %1, %2\n\t"
-					    : "=r"(q) : "r"(y_shifted),
-						"r"(x_m));
+					__asm__("udiv %0, %1, %2" : "=r"(q) : "r"(static_cast<uint32_t>(num)), "r"(x_m));
 					t_Q24 = q;
-#else
-					t_Q24 = y_shifted / x_m;
-#endif
-				}
-			}
-		}
-	}
-
-	// t_Q24 in [0, 2^24] (inclusive: t==1 when y==x after swap)
-	// idx      = top 8 bits  => table index 0..255
-	// frac_Q16 = next 16 bits => linear interpolation weight in [0, 2^16)
-	uint32_t idx      = t_Q24 >> 16; // 0..255
-	uint32_t frac_Q16 = t_Q24 & 0xFFFFu; // 0..65535
-
-	if (idx > 255) idx = 255; // safety clamp
-
-	// ----------------------------------------------------------------
-	// Table lookup + integer linear interpolation
-	//
-	// angle = base + frac_Q16 * (next - base) / 2^16
-	//
-	// We do this in integer arithmetic:
-	//   base_m, next_m are normalised mantissas in [2^29, 2^30) (signed,
-	//   but atan is non-negative for t in [0,1] so both positive here).
-	//   Their exponents differ by at most 8 (table spans [-38,-30]).
-	//
-	// Rather than full SoftFloat add, we align the two mantissas to the
-	// larger exponent, do the interpolation in integer, then renormalise.
-	//
-	// delta = next - base (aligned to base's exponent, clipped to 31 bits)
-	// result_m = base_m + (delta * frac_Q16) >> 16
-	// ----------------------------------------------------------------
-
-	int32_t base_m = ATAN_MANT[idx];
-	int32_t base_e = ATAN_EXP[idx];
-	int32_t next_m = ATAN_MANT[idx + 1];
-	int32_t next_e = ATAN_EXP[idx + 1];
-
-	// Handle the zero entry at idx==0 (atan(0)==0).
-	// ATAN_MANT[0] == 0, so base is zero; result = frac * next.
-	int32_t result_m;
-	int32_t result_e;
-
-	if (UNLIKELY(base_m == 0)) {
-		// Interpolate from 0 to next: result = frac_Q16 * next / 2^16
-		// result_m = (next_m * frac_Q16) >> 16
-		int64_t prod = static_cast<int64_t>(next_m) * static_cast<int64_t>(frac_Q16);
-		result_m = static_cast<int32_t>(prod >> 16);
-		result_e = next_e;
-		// Normalise (result_m may be small if frac_Q16 is small)
-		if (result_m != 0) {
-			uint32_t a = static_cast<uint32_t>(result_m); // always positive here
-			int lz = sf_clz(a);
-			int sh = lz - 2;
-			if (sh > 0) { result_m <<= sh; result_e -= sh; }
-			else if (sh < 0) { result_m >>= -sh; result_e += -sh; }
-		}
-	}
-	else {
-		// Align next to base exponent.
-		// Exponent of (next - base) inherits the larger exponent (base_e or next_e).
-		// Consecutive table entries have very similar values, so delta is small
-		// and their exponents are equal or differ by 1.
-		int32_t delta_m;
-		int32_t delta_e;
-
-		int exp_d = base_e - next_e; // usually 0 or 1
-		if (exp_d == 0) {
-			delta_m = next_m - base_m; // signed, may be negative (shouldn't be for increasing atan)
-			delta_e = base_e;
-		}
-		else if (exp_d > 0) {
-			// base_e > next_e: shift next right
-			int rs = exp_d < 31 ? exp_d : 31;
-			delta_m = (next_m >> rs) - base_m;
-			delta_e = base_e;
-		}
-		else {
-			// next_e > base_e: shift base right
-			int rs = (-exp_d) < 31 ? (-exp_d) : 31;
-			delta_m = next_m - (base_m >> rs);
-			delta_e = next_e;
-		}
-
-		// Interpolation: result = base + frac_Q16 * delta / 2^16
-		// Keep everything at base_e / delta_e.
-		// (frac_Q16 * delta_m) >> 16: delta_m < 2^30, frac_Q16 < 2^16 => product < 2^46, fits int64_t.
-		int64_t interp = static_cast<int64_t>(delta_m) * static_cast<int64_t>(frac_Q16);
-		int32_t corr_m = static_cast<int32_t>(interp >> 16); // delta_e units
-
-		// Add base_m (at base_e) + corr_m (at delta_e).
-		// Align corr to base exponent.
-		int32_t sum_m;
-		int32_t sum_e = base_e;
-
-		if (delta_e == base_e) {
-			sum_m = base_m + corr_m;
-		}
-		else {
-			// delta_e != base_e: align
-			int align = base_e - delta_e;
-			if (align > 0 && align < 31) {
-				sum_m = base_m + (corr_m >> align);
-			}
-			else if (align < 0 && (-align) < 31) {
-				sum_m = (base_m >> (-align)) + corr_m;
-				sum_e = delta_e;
-			}
-			else {
-				sum_m = base_m; // correction negligible
-			}
-		}
-
-		result_m = sum_m;
-		result_e = sum_e;
-
-		// Renormalise (sum may have overflowed by 1 bit or lost a bit)
-		if (result_m != 0) {
-			uint32_t a = sf_abs32(result_m);
-			if (a >= 0x40000000u) { result_m >>= 1; result_e += 1; }
-			else if (a < 0x20000000u) {
-				int lz = sf_clz(a);
-				int sh = lz - 2;
-				if (result_m < 0) {
-					result_m = -static_cast<int32_t>(
-					    static_cast<uint32_t>(-result_m) << sh);
 				}
 				else {
-					result_m <<= sh;
+					t_Q24 = static_cast<uint32_t>(num / x_m);
 				}
-				result_e -= sh;
+#else
+				t_Q24 = static_cast<uint32_t>(num / x_m);
+#endif
 			}
 		}
 	}
 
-	SoftFloat angle = (result_m == 0)
-	                ? SoftFloat::zero()
-	                : SoftFloat::from_raw(result_m, sf_sat_exp(result_e));
+	// Table lookup with linear interpolation
+	// idx is the integer part (0-256), frac is the fractional part in Q16
+	const uint32_t idx = t_Q24 >> 16;
+	const uint32_t frac = t_Q24 & 0xFFFFu;
 
-	// ----------------------------------------------------------------
-	// Octant reconstruction
-	// ----------------------------------------------------------------
-	if (swap)  angle = SoftFloat::half_pi() - angle;
-	if (x_neg) angle = SoftFloat::pi() - angle;
-	if (y_neg) angle = -angle;
+	int32_t angle_q29;
+	if (idx >= 256) {
+		// Ratio is exactly 1.0 (or slightly above due to rounding)
+		angle_q29 = ATAN_TAB_Q29[256];
+	}
+	else {
+		const int32_t a0 = ATAN_TAB_Q29[idx];
+		const int32_t a1 = ATAN_TAB_Q29[idx + 1];
+		// Linear interpolation: a0 + (a1 - a0) * frac / 65536
+		angle_q29 = a0 + static_cast<int32_t>((static_cast<int64_t>(a1 - a0) * frac) >> 16);
+	}
 
-	return angle;
+	// Quadrant adjustments - all in Q29 fixed-point
+	// After table lookup: angle is in [0, π/4]
+	// After swap:         angle is in [0, π/2]
+	// After x_neg:        angle is in [0, π]
+	// After y_neg:        angle is in [-π, π]
+
+	if (swap)  angle_q29 = HALF_PI_Q29 - angle_q29;
+	if (x_neg) angle_q29 = PI_Q29 - angle_q29;
+	if (y_neg) angle_q29 = -angle_q29;
+
+	// Single conversion to SoftFloat at the end
+	// The constructor normalizes automatically
+	return SoftFloat(angle_q29, -29);
 }
 
 #else

@@ -123,7 +123,7 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-	  main_tests();
+      main_tests();
 	  linpack();
     /* USER CODE END WHILE */
 
