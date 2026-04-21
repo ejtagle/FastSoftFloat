@@ -2915,51 +2915,49 @@ constexpr SoftFloat SoftFloat::pow(SoftFloat y) const noexcept {
 	return (y * log()).exp();
 }
 
-#if 1
 constexpr SF_HOT SoftFloat hypot(SoftFloat x, SoftFloat y) noexcept {
-	x = x.abs(); y = y.abs();
-	if (x < y) { SoftFloat t = x; x = y; y = t; }
-	if (x.mantissa == 0) return SoftFloat::zero();
-    
-	int32_t e = x.exponent;
-	// Direct scaled mantissas — skip SoftFloat construction overhead:
-	int32_t xm = x.mantissa; // already normalised
-	int32_t ym_e = y.exponent - e; // relative exponent of y
-    
-	// Scale: xs = x.m * 2^{-29}, ys = y.m * 2^{ym_e - 29}
-	// xs² = x.m² * 2^{-58}, ys² = y.m² * 2^{2*(ym_e-29)}
-	// Both at exponent -58 + 2*29 = -58+58 = 0? No.
-	// Actually xs.m² >> 29 = product mantissa at exponent xs_e*2 + 29 = -29
-	// This is what mul_plain does. Keep existing approach, just reduce
-	// the number of from_raw + normalise calls:
-    
-	SoftFloat xs2 = SoftFloat::from_raw(xm, -29) * SoftFloat::from_raw(xm, -29);
-    
-	int32_t ym_rel = ym_e - 29; // ys exponent (relative)
-	SoftFloat ys_sf = (ym_rel > -60) ? SoftFloat::from_raw(y.mantissa, ym_rel) : SoftFloat::zero();
-	SoftFloat ys2 = ys_sf * ys_sf;
-    
-	SoftFloat s = xs2 + ys2;
-	SoftFloat r = s * s.inv_sqrt(); // sqrt
-	return SoftFloat::from_raw(r.mantissa, r.exponent + e + 29);
-}
-#else
-constexpr SF_HOT SoftFloat hypot(SoftFloat x, SoftFloat y) noexcept {
-	x = x.abs(); y = y.abs();
-	if (x < y) { SoftFloat t = x; x = y; y = t; }
-	if (x.mantissa == 0) return SoftFloat::zero();
+	x = x.abs(); 
+	y = y.abs();
 
-	// Scale both by 2^{-(e+29)} so xs ≈ [0.5,1) and ys ≤ xs.
-	// This keeps x²+y² in [0.25, 2), well within normalised range.
-	int32_t e = x.exponent;
-	SoftFloat xs = SoftFloat::from_raw(x.mantissa, -29);
-	SoftFloat ys = y.mantissa != 0
-				? SoftFloat::from_raw(y.mantissa, y.exponent - e - 29)
-				: SoftFloat::zero();
-	SoftFloat r = (xs * xs + ys * ys).sqrt();          // no division
-	return SoftFloat::from_raw(r.mantissa, r.exponent + e + 29);  // restore original scale
+	if (x.mantissa == 0) return y;
+	if (y.mantissa == 0) return x;
+	if (x < y) { SoftFloat t = x; x = y; y = t; }
+
+	int32_t ex = x.exponent;
+	int32_t d  = ex - y.exponent;
+
+	// |y| negligible relative to |x| → result is |x| (error < ½ ulp)
+	if (d >= 15) return x;
+
+	uint32_t mx = static_cast<uint32_t>(x.mantissa);
+	uint32_t my = static_cast<uint32_t>(y.mantissa);
+
+	// S = mx² + my²·2^(‑2d)  is the exact integer coefficient of 2^(2·ex)
+	uint64_t mx2 = static_cast<uint64_t>(mx) * mx;
+	uint64_t my2 = static_cast<uint64_t>(my) * my;
+	uint64_t S   = mx2 + (my2 >> (2 * d));
+
+	// Pack S into a SoftFloat.  S ∈ [2⁵⁸, 2⁶¹)  →  S>>29 ∈ [2²⁹, 2³²).
+	uint32_t s_hi = static_cast<uint32_t>(S >> 29);
+	int32_t  s_e  = 29;
+
+	// s_hi must fit in a positive int32_t.  At most two right-shifts are needed.
+	if (s_hi >= 0x80000000u) {
+		s_hi >>= 2; // 2³¹..2³²‑1  →  2²⁹..2³⁰‑1
+		s_e  += 2;
+	}
+	else if (s_hi >= 0x40000000u) {
+		s_hi >>= 1; // 2³⁰..2³¹‑1  →  2²⁹..2³⁰‑1
+		s_e  += 1;
+	}
+	// s_hi is now guaranteed in [0x20000000, 0x3FFFFFFF]: already normalized.
+
+	SoftFloat s_sf = SoftFloat::from_raw(static_cast<int32_t>(s_hi), s_e);
+
+	// √(x²+y²) = √S · 2^ex
+	SoftFloat r = s_sf.sqrt();
+	return SoftFloat::from_raw(r.mantissa, r.exponent + ex);
 }
-#endif
 
 // trunc – toward zero
 constexpr SF_HOT SoftFloat SoftFloat::trunc() const noexcept {
