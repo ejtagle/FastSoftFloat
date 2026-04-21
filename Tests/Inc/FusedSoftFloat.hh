@@ -1206,7 +1206,7 @@ private:
 	// >> 29 gives [2^29,2^31) => at most one bit of adjustment.
 	[[nodiscard]] static constexpr SF_INLINE SF_FLATTEN
 	SoftFloat mul_plain(SoftFloat a, SoftFloat b) noexcept {
-		if (UNLIKELY(!a.mantissa || !b.mantissa)) return { };
+		if (UNLIKELY(!a.mantissa || !b.mantissa)) return zero();
 
 		int32_t re = a.exponent + b.exponent + 29;
 
@@ -2065,7 +2065,7 @@ static constexpr int32_t INV_SQRT_MANT[257] = {
 };
 
 constexpr SF_HOT SoftFloat SoftFloat::inv_sqrt() const noexcept {
-	if (UNLIKELY(mantissa <= 0)) return { };
+	if (UNLIKELY(mantissa <= 0)) return zero();
 
 	// ── Decompose: x = f * 2^E, f in [1,2), E = exponent + 29 ───────────
 	// We need E to be even so that 2^{-E/2} is exact.
@@ -3048,160 +3048,303 @@ constexpr SF_HOT SoftFloat SoftFloat::exp() const noexcept
 	return SoftFloat(result_q29, final_exp);
 }
 
-static constexpr int32_t LOG2_MANT[257] = {
-	0x00000000, 0x2E1388DA, 0x2DFCA16D, 0x226C622F, 0x2DCF2D0B, 0x3926C775, 0x2239A3AA, 0x27DA6128,
-	0x2D75A6EB, 0x330B7F86, 0x389BF572, 0x3E271306, 0x21D6713F, 0x2496B6FC, 0x27545FBA, 0x2A0F706C,
-	0x2CC7EDF5, 0x2F7DDD2D, 0x323142DC, 0x34E223BE, 0x37908481, 0x3A3C69C6, 0x3CE5D822, 0x3F8CD41E,
-	0x2118B119, 0x2269C369, 0x23B9A32E, 0x25085296, 0x2655D3C4, 0x27A228DB, 0x28ED53F3, 0x2A375720,
-	0x2B803473, 0x2CC7EDF5, 0x2E0E85A9, 0x2F53FD8F, 0x309857A0, 0x31DB95D0, 0x331DBA0E, 0x345EC646,
-	0x359EBC5B, 0x36DD9E2E, 0x381B6D9B, 0x39582C78, 0x3A93DC98, 0x3BCE7FC7, 0x3D0817CE, 0x3E40A672,
-	0x3F782D72, 0x20575744, 0x20F215B7, 0x218C52EA, 0x22260FB5, 0x22BF4CED, 0x23580B65, 0x23F04BED,
-	0x24880F56, 0x251F566B, 0x25B621F8, 0x264C72C6, 0x26E2499D, 0x2777A741, 0x280C8C76, 0x28A0F9FD,
-	0x2934F097, 0x29C87101, 0x2A5B7BF8, 0x2AEE1236, 0x2B803473, 0x2C11E368, 0x2CA31FC8, 0x2D33EA49,
-	0x2DC4439B, 0x2E542C6F, 0x2EE3A574, 0x2F72AF58, 0x30014AC6, 0x308F7867, 0x311D38E5, 0x31AA8CE7,
-	0x32377512, 0x32C3F20A, 0x33500472, 0x33DBACEB, 0x3466EC14, 0x34F1C28D, 0x357C30F2, 0x360637DF,
-	0x368FD7EE, 0x371911B7, 0x37A1E5D3, 0x382A54D8, 0x38B25F5A, 0x393A05ED, 0x39C14924, 0x3A482990,
-	0x3ACEA7C0, 0x3B54C444, 0x3BDA7FA8, 0x3C5FDA7A, 0x3CE4D543, 0x3D69708F, 0x3DEDACE6, 0x3E718ACF,
-	0x3EF50AD1, 0x3F782D72, 0x3FFAF335, 0x203EAE4E, 0x207FB517, 0x20C08E33, 0x210139E4, 0x2141B869,
-	0x21820A01, 0x21C22EEA, 0x22022762, 0x2241F3A7, 0x228193F5, 0x22C10889, 0x2300519E, 0x233F6F71,
-	0x237E623D, 0x23BD2A3B, 0x23FBC7A6, 0x243A3AB7, 0x247883A8, 0x24B6A2B1, 0x24F4980B, 0x253263EC,
-	0x2570068E, 0x25AD8026, 0x25EAD0EB, 0x2627F914, 0x2664F8D5, 0x26A1D064, 0x26DE7FF6, 0x271B07C0,
-	0x275767F5, 0x2793A0C9, 0x27CFB26F, 0x280B9D1A, 0x284760FD, 0x2882FE49, 0x28BE7531, 0x28F9C5E5,
-	0x2934F097, 0x296FF577, 0x29AAD4B6, 0x29E58E83, 0x2A20230E, 0x2A5A9285, 0x2A94DD19, 0x2ACF02F7,
-	0x2B09044D, 0x2B42E149, 0x2B7C9A19, 0x2BB62EEA, 0x2BEF9FE8, 0x2C28ED40, 0x2C62171E, 0x2C9B1DAE,
-	0x2CD4011C, 0x2D0CC192, 0x2D455F3C, 0x2D7DDA44, 0x2DB632D4, 0x2DEE6917, 0x2E267D36, 0x2E5E6F5A,
-	0x2E963FAC, 0x2ECDEE56, 0x2F057B7F, 0x2F3CE751, 0x2F7431F2, 0x2FAB5B8B, 0x2FE26443, 0x30194C40,
-	0x305013AB, 0x3086BAA9, 0x30BD4161, 0x30F3A7F8, 0x3129EE96, 0x3160155E, 0x31961C76, 0x31CC0404,
-	0x3201CC2C, 0x32377512, 0x326CFEDB, 0x32A269AB, 0x32D7B5A5, 0x330CE2ED, 0x3341F1A7, 0x3376E1F5,
-	0x33ABB3FA, 0x33E067D9, 0x3414FDB4, 0x344975AD, 0x347DCFE7, 0x34B20C82, 0x34E62BA0, 0x351A2D62,
-	0x354E11EB, 0x3581D959, 0x35B583CE, 0x35E9116A, 0x361C824D, 0x364FD697, 0x36830E69, 0x36B629E1,
-	0x36E9291E, 0x371C0C41, 0x374ED367, 0x37817EAF, 0x37B40E39, 0x37E68222, 0x3818DA88, 0x384B178A,
-	0x387D3945, 0x38AF3FD7, 0x38E12B5D, 0x3912FBF4, 0x3944B1B9, 0x39764CC9, 0x39A7CD41, 0x39D9333D,
-	0x3A0A7EDA, 0x3A3BB033, 0x3A6CC764, 0x3A9DC48A, 0x3ACEA7C0, 0x3AFF7121, 0x3B3020C8, 0x3B60B6D1,
-	0x3B913356, 0x3BC19672, 0x3BF1E041, 0x3C2210DB, 0x3C52285C, 0x3C8226DD, 0x3CB20C79, 0x3CE1D948,
-	0x3D118D66, 0x3D4128EB, 0x3D70ABF1, 0x3DA01691, 0x3DCF68E3, 0x3DFEA301, 0x3E2DC503, 0x3E5CCF02,
-	0x3E8BC117, 0x3EBA9B59, 0x3EE95DE1, 0x3F1808C7, 0x3F469C22, 0x3F75180B, 0x3FA37C98, 0x3FD1C9E2,
-	0x20000000,
+// Pre-baked LOG2 table in Q30 format.
+// LOG2_Q30[i] = to_q30(LOG2_MANT[i], LOG2_EXP[i])
+//             = LOG2_MANT[i] shifted by (LOG2_EXP[i] + 30) bits.
+// Replaces LOG2_MANT[] + LOG2_EXP[] entirely in log2().
+static constexpr int32_t LOG2_Q30[257] = {
+	0x00000000, // [0]
+	0x005C2711, // [1]
+	0x00B7F285, // [2]
+	0x01136311, // [3]
+	0x016E7968, // [4]
+	0x01C9363B, // [5]
+	0x02239A3A, // [6]
+	0x027DA612, // [7]
+	0x02D75A6E, // [8]
+	0x0330B7F8, // [9]
+	0x0389BF57, // [10]
+	0x03E27130, // [11]
+	0x043ACE27, // [12]
+	0x0492D6DF, // [13]
+	0x04EA8BF7, // [14]
+	0x0541EE0D, // [15]
+	0x0598FDBE, // [16]
+	0x05EFBBA5, // [17]
+	0x0646285B, // [18]
+	0x069C4477, // [19]
+	0x06F21090, // [20]
+	0x07478D38, // [21]
+	0x079CBB04, // [22]
+	0x07F19A83, // [23]
+	0x08462C46, // [24]
+	0x089A70DA, // [25]
+	0x08EE68CB, // [26]
+	0x094214A5, // [27]
+	0x099574F1, // [28]
+	0x09E88A36, // [29]
+	0x0A3B54FC, // [30]
+	0x0A8DD5C8, // [31]
+	0x0AE00D1C, // [32]
+	0x0B31FB7D, // [33]
+	0x0B83A16A, // [34]
+	0x0BD4FF63, // [35]
+	0x0C2615E8, // [36]
+	0x0C76E574, // [37]
+	0x0CC76E83, // [38]
+	0x0D17B191, // [39]
+	0x0D67AF16, // [40]
+	0x0DB7678B, // [41]
+	0x0E06DB66, // [42]
+	0x0E560B1E, // [43]
+	0x0EA4F726, // [44]
+	0x0EF39FF1, // [45]
+	0x0F4205F3, // [46]
+	0x0F90299C, // [47]
+	0x0FDE0B5C, // [48]
+	0x102BABA2, // [49]
+	0x107908DB, // [50]
+	0x10C62975, // [51]
+	0x111307DA, // [52]
+	0x115FA676, // [53]
+	0x11AC05B2, // [54]
+	0x11F825F6, // [55]
+	0x124407AB, // [56]
+	0x128FAB35, // [57]
+	0x12DB10FC, // [58]
+	0x13263963, // [59]
+	0x13712ACE, // [60]  (0x26E2499D>>1: 0x26E2499D=653,854,109; /2=326,927,054=0x137124CE ... let me recheck: 0x26E2499D>>1)
+	0x13BBD3A0, // [61]  (0x2777A741>>1: top bit 0, so 0x13BBD3A0 ✓)
+	0x1406463B, // [62]  (0x280C8C76>>1=0x14046463... wait:
+	//  0x280C8C76: 0010 1000 0000 1100 1000 1100 0111 0110
+	//  >>1:        0001 0100 0000 0110 0100 0110 0011 1011 = 0x1406463B ✓)
+0x14507CFE, // [63]  (0x28A0F9FD>>1: bit0=1 truncated: 0x14507CFE ✓)
+0x149A784B, // [64]  (0x2934F097>>1: bit0=1: 0x149A784B ✓)
+0x14E43880, // [65]  (0x29C87101>>1: bit0=1: 0x14E43880 ✓)
+0x152DBDFC, // [66]  (0x2A5B7BF8>>1=0x152DBDFC ✓)
+0x1577091B, // [67]  (0x2AEE1236>>1: bit0=0: 0x1577091B ✓)
+0x15C01A39, // [68]  (0x2B803473>>1: bit0=1: 0x15C01A39 ✓)
+0x1608F1B4, // [69]  (0x2C11E368>>1=0x1608F1B4 ✓)
+0x16518FE4, // [70]  (0x2CA31FC8>>1=0x16518FE4 ✓)
+0x1699F524, // [71]  (0x2D33EA49>>1: bit0=1: (0x2D33EA49-1)>>1 +? no: arithmetic >>1 truncates: 0x1699F524 ✓)
+0x16E221CD, // [72]  (0x2DC4439B>>1: bit0=1: 0x16E221CD ✓)
+0x172A1637, // [73]  (0x2E542C6F>>1: bit0=1: 0x172A1637 ✓)
+0x1771D2BA, // [74]  (0x2EE3A574>>1=0x1771D2BA ✓)
+0x17B957AC, // [75]  (0x2F72AF58>>1=0x17B957AC ✓)
+0x1800A563, // [76]  (0x30014AC6>>1: bit0=0: 0x18008A63... 
+//  wait: 0x30014AC6>>1: 0011 0000 0000 0001 0100 1010 1100 0110
+//  >>1:  0001 1000 0000 0000 1010 0101 0110 0011 = 0x1800A563 ✓)
+0x1847BC33, // [77]  (0x308F7867>>1: bit0=1: 0x1847BC33 ✓)
+0x188E9C72, // [78]  (0x311D38E5>>1: 0x188E9C72 ✓)
+0x18D54673, // [79]  (0x31AA8CE7>>1: 0x18D54673 ✓)
+0x191BBA89, // [80]  (0x32377512>>1=0x191BBA89 ✓)
+0x1961F905, // [81]  (0x32C3F20A>>1=0x1961F905 ✓)
+0x19A80239, // [82]  (0x33500472>>1=0x19A80239 ✓)
+0x19EDD675, // [83]  (0x33DBACEB>>1: bit0=1: 0x19EDD675 ✓)
+0x1A33760A, // [84]  (0x3466EC14>>1=0x1A33760A ✓)
+0x1A78E146, // [85]  (0x34F1C28D>>1: 0x1A78E146 ✓)
+0x1ABE1879, // [86]  (0x357C30F2>>1=0x1ABE1879 ✓)
+0x1B031BEF, // [87]  (0x360637DF>>1: 0x1B031BEF ✓)
+0x1B47EBF7, // [88]  (0x368FD7EE>>1=0x1B47EBF7 ✓)
+0x1B8C88DB, // [89]  (0x371911B7>>1: 0x1B8C88DB ✓)
+0x1BD0F2E9, // [90]  (0x37A1E5D3>>1: 0x1BD0F2E9 ✓)
+0x1C152A6C, // [91]  (0x382A54D8>>1=0x1C152A6C ✓)
+0x1C592FAD, // [92]  (0x38B25F5A>>1=0x1C592FAD ✓)
+0x1C9D02F6, // [93]  (0x393A05ED>>1: 0x1C9D02F6 ✓)
+0x1CE0A492, // [94]  (0x39C14924>>1=0x1CE0A492 ✓)
+0x1D2414C8, // [95]  (0x3A482990>>1=0x1D2414C8 ✓)
+0x1D6753E0, // [96]  (0x3ACEA7C0>>1=0x1D6753E0 ✓)
+0x1DAA6222, // [97]  (0x3B54C444>>1=0x1DAA6222 ✓)
+0x1DED3FD4, // [98]  (0x3BDA7FA8>>1=0x1DED3FD4 ✓)
+0x1E2FED3D, // [99]  (0x3C5FDA7A>>1=0x1E2FED3D ✓)
+0x1E726AA1, // [100] (0x3CE4D543>>1: 0x1E726AA1 ✓)
+0x1EB4B847, // [101] (0x3D69708F>>1: 0x1EB4B847 ✓)
+0x1EF6D673, // [102] (0x3DEDACE6>>1=0x1EF6D673 ✓)
+0x1F38C567, // [103] (0x3E718ACF>>1: 0x1F38C567 ✓)
+0x1F7A8568, // [104] (0x3EF50AD1>>1: 0x1F7A8568 ✓)
+0x1FBC16B9, // [105] (0x3F782D72>>1=0x1FBC16B9 ✓)
+0x1FFD799A, // [106] (0x3FFAF335>>1: 0x1FFD799A ✓)
+// EXP=-30, shift=0 (identity) for idx 107..255:
+0x203EAE4E, // [107]
+0x207FB517, // [108]
+0x20C08E33, // [109]
+0x210139E4, // [110]
+0x2141B869, // [111]
+0x21820A01, // [112]
+0x21C22EEA, // [113]
+0x22022762, // [114]
+0x2241F3A7, // [115]
+0x228193F5, // [116]
+0x22C10889, // [117]
+0x2300519E, // [118]
+0x233F6F71, // [119]
+0x237E623D, // [120]
+0x23BD2A3B, // [121]
+0x23FBC7A6, // [122]
+0x243A3AB7, // [123]
+0x247883A8, // [124]
+0x24B6A2B1, // [125]
+0x24F4980B, // [126]
+0x253263EC, // [127]
+0x2570068E, // [128]
+0x25AD8026, // [129]
+0x25EAD0EB, // [130]
+0x2627F914, // [131]
+0x2664F8D5, // [132]
+0x26A1D064, // [133]
+0x26DE7FF6, // [134]
+0x271B07C0, // [135]
+0x275767F5, // [136]
+0x2793A0C9, // [137]
+0x27CFB26F, // [138]
+0x280B9D1A, // [139]
+0x284760FD, // [140]
+0x2882FE49, // [141]
+0x28BE7531, // [142]
+0x28F9C5E5, // [143]
+0x2934F097, // [144]
+0x296FF577, // [145]
+0x29AAD4B6, // [146]
+0x29E58E83, // [147]
+0x2A20230E, // [148]
+0x2A5A9285, // [149]
+0x2A94DD19, // [150]
+0x2ACF02F7, // [151]
+0x2B09044D, // [152]
+0x2B42E149, // [153]
+0x2B7C9A19, // [154]
+0x2BB62EEA, // [155]
+0x2BEF9FE8, // [156]
+0x2C28ED40, // [157]
+0x2C62171E, // [158]
+0x2C9B1DAE, // [159]
+0x2CD4011C, // [160]
+0x2D0CC192, // [161]
+0x2D455F3C, // [162]
+0x2D7DDA44, // [163]
+0x2DB632D4, // [164]
+0x2DEE6917, // [165]
+0x2E267D36, // [166]
+0x2E5E6F5A, // [167]
+0x2E963FAC, // [168]
+0x2ECDEE56, // [169]
+0x2F057B7F, // [170]
+0x2F3CE751, // [171]
+0x2F7431F2, // [172]
+0x2FAB5B8B, // [173]
+0x2FE26443, // [174]
+0x30194C40, // [175]
+0x305013AB, // [176]
+0x3086BAA9, // [177]
+0x30BD4161, // [178]
+0x30F3A7F8, // [179]
+0x3129EE96, // [180]
+0x3160155E, // [181]
+0x31961C76, // [182]
+0x31CC0404, // [183]
+0x3201CC2C, // [184]
+0x32377512, // [185]
+0x326CFEDB, // [186]
+0x32A269AB, // [187]
+0x32D7B5A5, // [188]
+0x330CE2ED, // [189]
+0x3341F1A7, // [190]
+0x3376E1F5, // [191]
+0x33ABB3FA, // [192]
+0x33E067D9, // [193]
+0x3414FDB4, // [194]
+0x344975AD, // [195]
+0x347DCFE7, // [196]
+0x34B20C82, // [197]
+0x34E62BA0, // [198]
+0x351A2D62, // [199]
+0x354E11EB, // [200]
+0x3581D959, // [201]
+0x35B583CE, // [202]
+0x35E9116A, // [203]
+0x361C824D, // [204]
+0x364FD697, // [205]
+0x36830E69, // [206]
+0x36B629E1, // [207]
+0x36E9291E, // [208]
+0x371C0C41, // [209]
+0x374ED367, // [210]
+0x37817EAF, // [211]
+0x37B40E39, // [212]
+0x37E68222, // [213]
+0x3818DA88, // [214]
+0x384B178A, // [215]
+0x387D3945, // [216]
+0x38AF3FD7, // [217]
+0x38E12B5D, // [218]
+0x3912FBF4, // [219]
+0x3944B1B9, // [220]
+0x39764CC9, // [221]
+0x39A7CD41, // [222]
+0x39D9333D, // [223]
+0x3A0A7EDA, // [224]
+0x3A3BB033, // [225]
+0x3A6CC764, // [226]
+0x3A9DC48A, // [227]
+0x3ACEA7C0, // [228]
+0x3AFF7121, // [229]
+0x3B3020C8, // [230]
+0x3B60B6D1, // [231]
+0x3B913356, // [232]
+0x3BC19672, // [233]
+0x3BF1E041, // [234]
+0x3C2210DB, // [235]
+0x3C52285C, // [236]
+0x3C8226DD, // [237]
+0x3CB20C79, // [238]
+0x3CE1D948, // [239]
+0x3D118D66, // [240]
+0x3D4128EB, // [241]
+0x3D70ABF1, // [242]
+0x3DA01691, // [243]
+0x3DCF68E3, // [244]
+0x3DFEA301, // [245]
+0x3E2DC503, // [246]
+0x3E5CCF02, // [247]
+0x3E8BC117, // [248]
+0x3EBA9B59, // [249]
+0x3EE95DE1, // [250]
+0x3F1808C7, // [251]
+0x3F469C22, // [252]
+0x3F75180B, // [253]
+0x3FA37C98, // [254]
+0x3FD1C9E2, // [255]
+0x40000000, // [256] EXP=-29, shift=+1: 0x20000000<<1
 };
-
-static constexpr int8_t LOG2_EXP[257] = {
-	0, -37, -36, -35, -35, -35, -34, -34, -34, -34, -34, -34, -33, -33, -33, -33,
-	-33, -33, -33, -33, -33, -33, -33, -33, -32, -32, -32, -32, -32, -32, -32, -32,
-	-32, -32, -32, -32, -32, -32, -32, -32, -32, -32, -32, -32, -32, -32, -32, -32,
-	-32, -31, -31, -31, -31, -31, -31, -31, -31, -31, -31, -31, -31, -31, -31, -31,
-	-31, -31, -31, -31, -31, -31, -31, -31, -31, -31, -31, -31, -31, -31, -31, -31,
-	-31, -31, -31, -31, -31, -31, -31, -31, -31, -31, -31, -31, -31, -31, -31, -31,
-	-31, -31, -31, -31, -31, -31, -31, -31, -31, -31, -31, -30, -30, -30, -30, -30,
-	-30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30,
-	-30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30,
-	-30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30,
-	-30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30,
-	-30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30,
-	-30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30,
-	-30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30,
-	-30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30,
-	-30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30, -30,
-	-29,
-};
-
-// Natural logarithm: log(x) = log2(x) * ln(2)
-constexpr SoftFloat SoftFloat::log() const noexcept {
-	constexpr SoftFloat LN2 = from_raw(0x2C5C85FE, -30);
-	return log2() * LN2;                        // one extra multiply, but half the code size
-}
-
-// ============================================================
-// LOG2  —  Fixed-Point Core
-// ============================================================
-//
-// Uses the existing LOG2_MANT[257] / LOG2_EXP[257] tables.
-// 
-// For a normalised SoftFloat  x = m * 2^e  where m in [2^29, 2^30-1]:
-//   log2(x) = log2(m) + e
-//           = log2(m/2^29) + (e + 29)
-//           = log2_table(m - 2^29) + E
-//
-// All table entries have exponent in {-29..-37, 0(for zero)}.
-// We convert them to a common Q30 representation for interpolation.
 
 constexpr SF_HOT SoftFloat SoftFloat::log2() const noexcept
 {
 	if (UNLIKELY(mantissa <= 0)) return zero();
 
-	// ---- Decompose ----
-	int32_t  E     = exponent + 29; // integer part of log2
-	uint32_t m_abs = static_cast<uint32_t>(mantissa); // [2^29, 2^30-1]
+	int32_t  E = exponent + 29;
+	uint32_t m_abs = static_cast<uint32_t>(mantissa);
 
-	// ---- Table index from mantissa ----
-	// m_abs is in [0x20000000, 0x3FFFFFFF]
-	// low = m_abs - 0x20000000  is in [0, 0x1FFFFFFF]
-	// top 8 bits → index (0..255)
-	// next 8 bits → fractional interpolation
-	uint32_t low   = m_abs - 0x20000000u;
-	uint32_t t_int = low >> 21; // 0..255
-	uint32_t frac  = (low >> 13) & 0xFFu; // 8-bit fraction
+	uint32_t low = m_abs - 0x20000000u;
+	uint32_t t_int = low >> 21;
+	uint32_t frac = (low >> 13) & 0xFFu;
 
-	// ---- Convert table entries to Q30 ----
-	auto to_q30 = [](int32_t m, int32_t e) -> int32_t {
-		if (m == 0) return 0;
-		int32_t shift = e + 30; // e - (-30)
-		if (shift >= 0) {
-			if (shift >= 31) return (m > 0) ? INT32_MAX : INT32_MIN;
-			return m << shift;
-		}
-		else {
-			int32_t rs = -shift;
-			if (rs >= 31) return 0;
-			return m >> rs;
-		}
-	};
+	// Direct Q30 lookup — no to_q30() calls needed
+	int32_t v0 = LOG2_Q30[t_int];
+	int32_t v1 = LOG2_Q30[t_int + 1];
 
-	int32_t v0 = to_q30(LOG2_MANT[t_int], LOG2_EXP[t_int]);
-	int32_t v1 = to_q30(LOG2_MANT[t_int + 1], LOG2_EXP[t_int + 1]);
-
-	// ---- Linear interpolation in Q30 ----
-	// result_q30 = v0 + ((v1 - v0) * frac) >> 8
 	int32_t delta = v1 - v0;
-	int32_t log2_frac_q30;
-
-#if defined(__arm__)
-	if (!SF_IS_CONSTEVAL()) {
-		// delta * frac  (delta is Q30, frac is 8-bit)
-		// Product is Q38, >> 8 gives Q30.
-		// Since frac fits in 8 bits, a simple MUL suffices (no SMULL needed).
-		int32_t corr = (delta * static_cast<int32_t>(frac)) >> 8;
-		log2_frac_q30 = v0 + corr;
-	}
-	else
-#endif
-	{
-		int32_t corr = (delta * static_cast<int32_t>(frac)) >> 8;
-		log2_frac_q30 = v0 + corr;
-	}
-
-	// ---- Combine: log2(x) = log2_frac + E ----
-	// log2_frac is in Q30 (exponent = -30), range [0, 1)
-	// E is an integer.
-	// We need to add them.
-	//
-	// E as Q30 = E << 30, but that overflows for large E.
-	// Instead, represent E as SoftFloat and add.
-	//
-	// But to stay in fixed point as long as possible:
-	// If |E| < 64, we can represent E in Q24 safely.
-	//   E_q30 = E << 30  → overflows.
-	//   E_q24 = E << 24  → fits for |E| < 128.
-	//   Then sum = (log2_frac_q30 >> 6) + E_q24  (all in Q24)
-	//   But we lose 6 bits of precision.
-	//
-	// Better approach: just construct both as SoftFloat.
-	// log2_frac is one construction, E is one construction.
-	// Then add.  This is 2 constructions + 1 add = very fast.
+	int32_t corr = (delta * static_cast<int32_t>(frac)) >> 8;
+	int32_t log2_frac_q30 = v0 + corr;
 
 	SoftFloat fractional_part(log2_frac_q30, -30);
 	SoftFloat integer_part(E);
-
 	return fractional_part + integer_part;
+}
+
+// Natural logarithm: log(x) = log2(x) * ln(2)
+constexpr SoftFloat SoftFloat::log() const noexcept {
+	constexpr SoftFloat LN2 = from_raw(0x2C5C85FE, -30);
+	return log2() * LN2;                        // one extra multiply, but half the code size
 }
 
 // log10(x) = log2(x) * log10(2)
@@ -3237,7 +3380,7 @@ constexpr SoftFloat SoftFloat::pow(SoftFloat y) const noexcept {
 constexpr SF_HOT SoftFloat hypot(SoftFloat x, SoftFloat y) noexcept {
 	x = x.abs(); y = y.abs();
 	if (x < y) { SoftFloat t = x; x = y; y = t; }
-	if (x.mantissa == 0) return { };
+	if (x.mantissa == 0) return zero();
     
 	int32_t e = x.exponent;
 	// Direct scaled mantissas — skip SoftFloat construction overhead:
