@@ -12,7 +12,7 @@ find_bsp(
 
 bsp_include_directories(${BSP_ROOT}/Tests/Inc)
 
-bsp_compile_flags(-Wno-psabi -ffast-math)
+bsp_compile_flags(-Wno-psabi -ffast-math -fomit-frame-pointer)
 bsp_compile_flags($<$<COMPILE_LANGUAGE:CXX>:-std=c++23 -Wno-volatile>)
 
 add_bsp_based_executable(

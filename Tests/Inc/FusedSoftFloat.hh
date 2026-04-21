@@ -25,6 +25,7 @@
 #   define SF_HOT       __attribute__((hot))
 #   define SF_FLATTEN   __attribute__((flatten))
 #   define SF_PURE      __attribute__((pure))
+#   define SF_CONST     __attribute__((const))
 #   define LIKELY(x)    __builtin_expect(!!(x), 1)
 #   define UNLIKELY(x)  __builtin_expect(!!(x), 0)
 #else
@@ -33,6 +34,7 @@
 #   define SF_HOT
 #   define SF_FLATTEN
 #   define SF_PURE
+#   define SF_CONST
 #   define LIKELY(x)    (x)
 #   define UNLIKELY(x)  (x)
 #endif
@@ -69,7 +71,7 @@ template<typename To, typename From>
 // sf_clz — constexpr via std::countl_zero (C++20).
 // std::countl_zero(0) == 32 by spec (no UB, unlike __builtin_clz(0)).
 // On ARM, countl_zero compiles to a single CLZ instruction.
-[[nodiscard]] constexpr SF_INLINE int sf_clz(uint32_t x) noexcept
+[[nodiscard]] constexpr SF_CONST SF_INLINE int sf_clz(uint32_t x) noexcept
 {
 	if (SF_IS_CONSTEVAL()) {
 		return __builtin_clz(x);
@@ -98,12 +100,12 @@ template<typename To, typename From>
 }
 
 // sf_abs32 — branchless absolute value for int32_t, constexpr-safe.
-[[nodiscard]] constexpr SF_INLINE uint32_t sf_abs32(int32_t m) noexcept
+[[nodiscard]] constexpr SF_CONST SF_INLINE uint32_t sf_abs32(int32_t m) noexcept
 {
 #if defined(__arm__)
 	if (!SF_IS_CONSTEVAL()) {
 		uint32_t rd;
-		__asm__ volatile (
+		__asm__(
 			"eor %0, %1, %1, asr #31\n\t"
 			"sub %0, %0, %1, asr #31\n\t"
 			: "=&r"(rd) : "r"(m)
@@ -127,12 +129,12 @@ template<typename To, typename From>
 // sf_sat_exp — saturate exponent to [-128, 127].
 // At runtime on ARM: single SSAT instruction.
 // At compile time: portable C++ fallback (SSAT is not constexpr-able).
-[[nodiscard]] constexpr SF_INLINE int32_t sf_sat_exp(int32_t e) noexcept
+[[nodiscard]] constexpr SF_CONST SF_INLINE int32_t sf_sat_exp(int32_t e) noexcept
 {
 #if defined(__arm__)
 	if (!SF_IS_CONSTEVAL()) {
 		int32_t r;
-		__asm__ volatile (
+		__asm__(
 			"ssat %0, #8, %1\n\t" 
 			: "=r"(r) : "r"(e));
 		return r;
@@ -176,7 +178,7 @@ constexpr SF_INLINE void sf_normalise_fast(int32_t& m, int32_t& e) noexcept
 		// ── hot path: already normalised (bit 29 set, bit 30 clear) ──────
 		if (LIKELY((a & 0x60000000u) == 0x20000000u)) {
 			// SSAT is 1 cycle — always do it
-			__asm__ volatile("ssat %0, #8, %1" : "=r"(e) : "r"(e));
+			__asm__("ssat %0, #8, %1" : "=r"(e) : "r"(e));
 			return;
 		}
 
@@ -195,7 +197,7 @@ constexpr SF_INLINE void sf_normalise_fast(int32_t& m, int32_t& e) noexcept
 			e += 1;
 		}
 
-		__asm__ volatile("ssat %0, #8, %1" : "=r"(e) : "r"(e));
+		__asm__("ssat %0, #8, %1" : "=r"(e) : "r"(e));
 		m = static_cast<int32_t>((a ^ sign) - sign);
 		return;
 	}
@@ -300,7 +302,7 @@ static constexpr uint32_t recip_tab[512] = {
 // sf_recip — Newton-refined reciprocal, now constexpr.
 // Returns Y ≈ 2^60 / b  for b in [2^29, 2^30).
 // Uses one UMULL Newton step: ~14 cycles on Cortex-M3.
-[[nodiscard]] constexpr SF_INLINE uint64_t sf_recip(uint32_t b) noexcept
+[[nodiscard]] constexpr SF_CONST SF_INLINE uint64_t sf_recip(uint32_t b) noexcept
 {
 	uint32_t b2 = b << 1;                      // [2^29,2^30) → [2^30,2^31)
 	uint32_t idx = (b2 >> 21) & 0x1FFu;         // 9‑bit index into table
@@ -439,7 +441,7 @@ public:
 			uint32_t a;
 			uint32_t lz;
 			// abs(m) via arithmetic shift
-			__asm__ volatile(
+			__asm__(
 			    "eor %[a], %[m], %[m], asr #31\n\t"
 			    "sub %[a], %[a], %[m], asr #31\n\t"
 			    "clz %[lz], %[a]              \n\t"
@@ -455,7 +457,7 @@ public:
 			else if (shift < 0) {
 				int rs = -shift; a >>= rs; e += rs;
 			}
-			__asm__ volatile("ssat %0, #8, %1" : "=r"(e) : "r"(e));
+			__asm__("ssat %0, #8, %1" : "=r"(e) : "r"(e));
 			exponent = e;
 			mantissa = (m < 0) ? -static_cast<int32_t>(a) : static_cast<int32_t>(a);
 		}
@@ -742,7 +744,7 @@ public:
 			//   Dividend high word = ua (≡ the "ua:0" 64-bit value's top 32 bits).
 			//   q1 = floor(ua / vn1).  ua < 2^30, vn1 >= 2^15 ⟹ q1 < 2^15.
 			uint32_t q1, rhat;
-			__asm__ volatile (
+			__asm__ (
 				"udiv %0, %1, %2\n\t" 
 				: "=r"(q1) 
 				: "r"(ua), "r"(vn1)
@@ -763,7 +765,7 @@ public:
 			//   un21 < v ⟹ q0 = un21/vn1 < v/vn1 = v/(v>>16) ≤ 65535 < 2^16.
 			//   q0*vn0 ≤ 65535*65535 = 2^32 - 131071 < 2^32: no overflow.
 			uint32_t q0;
-			__asm__ volatile (
+			__asm__ (
 				"udiv %0, %1, %2\n\t" 
 				: "=r"(q0) 
 				: "r"(un21), "r"(vn1)
@@ -1432,6 +1434,7 @@ constexpr SoftFloat& SoftFloat::operator*=(SoftFloat r) noexcept {
 
 	int32_t am = a.mantissa;
 
+#if 0
 	if (d == 0) {
 		int32_t  s = am + pm;
 		if (UNLIKELY(s == 0)) return SoftFloat::zero();
@@ -1441,6 +1444,30 @@ constexpr SoftFloat& SoftFloat::operator*=(SoftFloat r) noexcept {
 		sf_normalise_fast(s, pe);
 		return SoftFloat::from_raw(s, pe);
 	}
+#else
+	if (d == 0) {
+		int32_t s = am + pm;
+		if (UNLIKELY(s == 0)) return SoftFloat::zero();
+
+		uint32_t abs_s = sf_abs32(s);
+
+		// LIKELY: already normalised (bit29 set, bit30 clear) — no CLZ needed
+		if (LIKELY((abs_s & 0x60000000u) == 0x20000000u)) {
+			pe = sf_sat_exp(pe);
+			return SoftFloat::from_raw(s, pe);
+		}
+		// 1-bit overflow (same-sign sum): shift right once
+		if (abs_s & 0x40000000u) {
+			s >>= 1;
+			pe += 1;
+			pe = sf_sat_exp_fast(pe);
+			return SoftFloat::from_raw(s, pe);
+		}
+		// Cancellation: full renormalise needed (rare)
+		sf_normalise_fast(s, pe);
+		return SoftFloat::from_raw(s, pe);
+	}
+#endif
 
 	int32_t exp;
 	if (d > 0) {
@@ -1735,76 +1762,61 @@ constexpr SoftFloat SoftFloat::tan() const noexcept {
 
 // ── C++ table definitions ───────────────────────────────────────────
 
-static constexpr int32_t SF_SIN_MANT[257] = {
-	         0, 843230191, 842976226, 631914790, 841960824,	1051499693, 630202589, 734275721,
-	837906553, 941032661, 1043591926, 572761285, 623381598,	673626408, 723465451, 772868706,
-	821806413, 870249095, 918167572, 965532978, 1012316784, 1058490808,	552013618, 574449320,
-	596538995, 618269338, 639627258, 660599890, 681174602, 701339000,	721080937, 740388522,
-	759250125, 777654384, 795590213, 813046808, 830013654, 846480531, 862437520,	877875009,
-	892783698, 907154608, 920979082, 934248793, 946955747, 959092290, 970651112,	981625251,
-	992008094, 1001793390, 1010975242, 1019548121, 1027506862, 1034846671, 1041563127,	1047652185,
-	1053110176,	1057933813, 1062120190, 1065666786, 1068571464, 1070832474, 1072448455, 1073418433,
-	536870912,	1073418433, 1072448455, 1070832474, 1068571464, 1065666786, 1062120190, 1057933813,
-	1053110176,	1047652185, 1041563127, 1034846671, 1027506862, 1019548121, 1010975242, 1001793390,
-	992008094,	981625251, 970651112, 959092290, 946955747, 934248793, 920979082, 907154608,
-	892783698, 877875009, 862437520, 846480531, 830013654, 813046808, 795590213, 777654384,
-	759250125, 740388522, 721080937, 701339000, 681174602, 660599890, 639627258, 618269338,
-	596538995, 574449320, 552013618, 1058490808, 1012316784, 965532978, 918167572, 870249095,
-	821806413, 772868706, 723465451, 673626408, 623381598, 572761285, 1043591926, 941032661,
-	837906553, 734275721, 630202589, 1051499693, 841960824, 631914790, 842976226, 843230191,
-	592202854, -843230191, -842976226, -631914790, -841960824, -1051499693, -630202589, -734275721,
-	-837906553, -941032661, -1043591926, -572761285, -623381598, -673626408, -723465451, -772868706,
-	-821806413, -870249095, -918167572, -965532978, -1012316784, -1058490808, -552013618, -574449320,
-	-596538995, -618269338, -639627258, -660599890, -681174602, -701339000, -721080937, -740388522,
-	-759250125, -777654384, -795590213, -813046808, -830013654, -846480531, -862437520, -877875009,
-	-892783698, -907154608, -920979082, -934248793, -946955747, -959092290, -970651112, -981625251,
-	-992008094, -1001793390, -1010975242, -1019548121, -1027506862, -1034846671, -1041563127, -1047652185,
-	-1053110176, -1057933813, -1062120190, -1065666786, -1068571464, -1070832474, -1072448455, -1073418433,
-	-536870912, -1073418433, -1072448455, -1070832474, -1068571464, -1065666786, -1062120190, -1057933813,
-	-1053110176, -1047652185, -1041563127, -1034846671, -1027506862, -1019548121, -1010975242, -1001793390,
-	-992008094, -981625251, -970651112, -959092290, -946955747, -934248793, -920979082,	-907154608,
-	-892783698, -877875009, -862437520, -846480531, -830013654, -813046808, -795590213, -777654384,
-	-759250125,	-740388522, -721080937, -701339000, -681174602, -660599890, -639627258, -618269338,
-	-596538995,	-574449320, -552013618, -1058490808, -1012316784, -965532978, -918167572, -870249095,
-	-821806413, -772868706,	-723465451, -673626408, -623381598, -572761285, -1043591926, -941032661,
-	-837906553, -734275721,	-630202589, -1051499693, -841960824, -631914790, -842976226, -843230191,
-	0,
-};
-
-static constexpr int8_t SF_SIN_EXP[257] = {
-	  0, -35, -34, -33, -33, -33, -32, -32,
-	-32, -32, -32, -31, -31, -31, -31, -31,
-	-31, -31, -31, -31,	-31, -31, -30, -30,
-	-30, -30, -30, -30, -30, -30, -30, -30,
-	-30, -30, -30, -30,	-30, -30, -30, -30,
-	-30, -30, -30, -30,	-30, -30, -30, -30,
-	-30, -30, -30, -30,	-30, -30, -30, -30,
-	-30, -30, -30, -30, -30, -30, -30, -30,
-	-29, -30, -30, -30, -30, -30, -30, -30,
-	-30, -30, -30, -30, -30, -30, -30, -30,
-	-30, -30, -30, -30, -30, -30, -30, -30,
-	-30, -30, -30, -30, -30, -30, -30, -30,
-	-30, -30, -30, -30, -30, -30, -30, -30,
-	-30, -30, -30, -31, -31, -31, -31, -31,
-	-31, -31, -31, -31, -31, -31, -32, -32,
-	-32, -32, -32, -33, -33, -33, -34, -35,
-	-82, -35, -34, -33, -33, -33, -32, -32,
-	-32, -32, -32, -31, -31, -31, -31, -31,
-	-31, -31, -31, -31, -31, -31, -30, -30,
-	-30, -30, -30, -30, -30, -30, -30, -30,
-	-30, -30, -30, -30, -30, -30, -30, -30,
-	-30, -30, -30, -30, -30, -30, -30, -30,
-	-30, -30, -30, -30, -30, -30, -30, -30,
-	-30, -30, -30, -30, -30, -30, -30, -30,
-	-29, -30, -30, -30, -30, -30, -30, -30,
-	-30, -30, -30, -30, -30, -30, -30, -30,
-	-30, -30, -30, -30, -30, -30, -30, -30,
-	-30, -30, -30, -30, -30, -30, -30, -30,
-	-30, -30, -30, -30, -30, -30, -30, -30,
-	-30, -30, -30, -31, -31, -31, -31, -31,
-	-31, -31, -31, -31, -31, -31, -32, -32,
-	-32, -32, -32, -33, -33, -33, -34, -35,
-	0,
+// ── SF_SIN_Q30 — pre-baked sin table in Q30 fixed-point ─────────────────────
+// SF_SIN_Q30[i] = round(sin(i * 2*pi / 256) * 2^30),  i = 0..256.
+//
+// Entry [256] mirrors [0] (= 0) so that the (idx+1) interpolation access
+// used in sincos() is always within bounds.
+//
+// cos(x) reuses this table with a quarter-cycle offset:
+//   s_val = SF_SIN_Q30[idx]          and SF_SIN_Q30[idx + 1]
+//   c_val = SF_SIN_Q30[(idx+64)&0xFF] and SF_SIN_Q30[((idx+64)&0xFF) + 1]
+//
+// Key values:
+//   [  0] =          0   sin(0)    = 0
+//   [ 32] =  759250125   sin(π/4)  ≈ 0.7071  (Q30 × √2/2, correctly rounded)
+//   [ 64] = 1073741824   sin(π/2)  = 1.0     (= Q30 = 2^30)
+//   [128] =          0   sin(π)    ≈ 0
+//   [192] =-1073741824   sin(3π/2) = -1.0    (= -Q30)
+//   [256] =          0   sin(2π)   = 0       (wraparound sentinel)
+//
+// Table size: 257 × 4 = 1028 bytes.
+// (Replaces SF_SIN_MANT[257] + SF_SIN_EXP[257] = 1028 + 257 = 1285 bytes.)
+// Regenerate with:  python3 gen_sin_q30.py > table_output.txt
+static constexpr int32_t SF_SIN_Q30[257] = {
+			   0,     26350943,     52686014,     78989349,    105245103,    131437462,    157550647,    183568930,
+	   209476638,    235258165,    260897982,    286380643,    311690799,    336813204,    361732726,    386434353,
+	   410903207,    435124548,    459083786,    482766489,    506158392,    529245404,    552013618,    574449320,
+	   596538995,    618269338,    639627258,    660599890,    681174602,    701339000,    721080937,    740388522,
+	   759250125,    777654384,    795590213,    813046808,    830013654,    846480531,    862437520,    877875009,
+	   892783698,    907154608,    920979082,    934248793,    946955747,    959092290,    970651112,    981625251,
+	   992008094,   1001793390,   1010975242,   1019548121,   1027506862,   1034846671,   1041563127,   1047652185,
+	  1053110176,   1057933813,   1062120190,   1065666786,   1068571464,   1070832474,   1072448455,   1073418433,
+	  1073741824,   1073418433,   1072448455,   1070832474,   1068571464,   1065666786,   1062120190,   1057933813,
+	  1053110176,   1047652185,   1041563127,   1034846671,   1027506862,   1019548121,   1010975242,   1001793390,
+	   992008094,    981625251,    970651112,    959092290,    946955747,    934248793,    920979082,    907154608,
+	   892783698,    877875009,    862437520,    846480531,    830013654,    813046808,    795590213,    777654384,
+	   759250125,    740388522,    721080937,    701339000,    681174602,    660599890,    639627258,    618269338,
+	   596538995,    574449320,    552013618,    529245404,    506158392,    482766489,    459083786,    435124548,
+	   410903207,    386434353,    361732726,    336813204,    311690799,    286380643,    260897982,    235258165,
+	   209476638,    183568930,    157550647,    131437462,    105245103,     78989349,     52686014,     26350943,
+			   0,    -26350943,    -52686014,    -78989349,   -105245103,   -131437462,   -157550647,   -183568930,
+	  -209476638,   -235258165,   -260897982,   -286380643,   -311690799,   -336813204,   -361732726,   -386434353,
+	  -410903207,   -435124548,   -459083786,   -482766489,   -506158392,   -529245404,   -552013618,   -574449320,
+	  -596538995,   -618269338,   -639627258,   -660599890,   -681174602,   -701339000,   -721080937,   -740388522,
+	  -759250125,   -777654384,   -795590213,   -813046808,   -830013654,   -846480531,   -862437520,   -877875009,
+	  -892783698,   -907154608,   -920979082,   -934248793,   -946955747,   -959092290,   -970651112,   -981625251,
+	  -992008094,  -1001793390,  -1010975242,  -1019548121,  -1027506862,  -1034846671,  -1041563127,  -1047652185,
+	 -1053110176,  -1057933813,  -1062120190,  -1065666786,  -1068571464,  -1070832474,  -1072448455,  -1073418433,
+	 -1073741824,  -1073418433,  -1072448455,  -1070832474,  -1068571464,  -1065666786,  -1062120190,  -1057933813,
+	 -1053110176,  -1047652185,  -1041563127,  -1034846671,  -1027506862,  -1019548121,  -1010975242,  -1001793390,
+	  -992008094,   -981625251,   -970651112,   -959092290,   -946955747,   -934248793,   -920979082,   -907154608,
+	  -892783698,   -877875009,   -862437520,   -846480531,   -830013654,   -813046808,   -795590213,   -777654384,
+	  -759250125,   -740388522,   -721080937,   -701339000,   -681174602,   -660599890,   -639627258,   -618269338,
+	  -596538995,   -574449320,   -552013618,   -529245404,   -506158392,   -482766489,   -459083786,   -435124548,
+	  -410903207,   -386434353,   -361732726,   -336813204,   -311690799,   -286380643,   -260897982,   -235258165,
+	  -209476638,   -183568930,   -157550647,   -131437462,   -105245103,    -78989349,    -52686014,    -26350943,
+			   0,
 };
 
 constexpr SF_HOT SoftFloatPair SoftFloat::sincos() const noexcept
@@ -1817,8 +1829,8 @@ constexpr SF_HOT SoftFloatPair SoftFloat::sincos() const noexcept
 	// ------------------------------------------------------------
 	constexpr int32_t INV_2PI_M = 683565276;
 	constexpr int32_t INV_2PI_E = -32;
-	constexpr int32_t TWO_PI_M  = 843314857;
-	constexpr int32_t TWO_PI_E  = -27;
+	constexpr int32_t TWO_PI_M = 843314857;
+	constexpr int32_t TWO_PI_E = -27;
 
 	SoftFloat xi = *this;
 	{
@@ -1852,9 +1864,9 @@ constexpr SF_HOT SoftFloatPair SoftFloat::sincos() const noexcept
 	if (!SF_IS_CONSTEVAL()) {
 		int32_t lo, hi;
 		__asm__("smull %0, %1, %2, %3"
-		        : "=&r"(lo),
+			: "=&r"(lo),
 			"=&r"(hi)
-		        : "r"(xi.mantissa),
+			: "r"(xi.mantissa),
 			"r"(K_Q25));
 		prod = (static_cast<int64_t>(hi) << 32) | static_cast<uint32_t>(lo);
 	}
@@ -1878,8 +1890,8 @@ constexpr SF_HOT SoftFloatPair SoftFloat::sincos() const noexcept
 		u_8_24 = 0;
 	}
 
-	uint32_t idx  = (u_8_24 >> 24) & 0xFFu; // 0..255
-	uint32_t frac =  u_8_24        & 0xFFFFFFu; // 24-bit fraction
+	uint32_t idx = (u_8_24 >> 24) & 0xFFu; // 0..255
+	uint32_t frac = u_8_24 & 0xFFFFFFu; // 24-bit fraction
 
 	// ------------------------------------------------------------
 	// 3) Table lookup
@@ -1896,27 +1908,14 @@ constexpr SF_HOT SoftFloatPair SoftFloat::sincos() const noexcept
 	const uint32_t c_idx1 = c_idx0 + 1u; // 1..256 if c_idx0==255
 
 	// ------------------------------------------------------------
-	// 4) Convert table entries to common Q30 format
+	// 4) Direct Q30 table lookups — no runtime conversion needed.
+	//    SF_SIN_Q30[i] already stores round(sin(i*2π/256) * 2^30).
+	//    cos uses the same table with a +64 quarter-cycle offset.
 	// ------------------------------------------------------------
-	auto to_q30 = [](int32_t m, int32_t e) constexpr -> int32_t {
-		if (m == 0) return 0;
-		int32_t shift = e + 30; // target exponent = -30
-
-		if (shift >= 0) {
-			if (shift >= 31) return (m > 0) ? INT32_MAX : INT32_MIN;
-			return m << shift;
-		}
-		else {
-			int32_t rs = -shift;
-			if (rs >= 31) return 0;
-			return m >> rs;
-		}
-	};
-
-	const int32_t s0 = to_q30(SF_SIN_MANT[s_idx0], SF_SIN_EXP[s_idx0]);
-	const int32_t s1 = to_q30(SF_SIN_MANT[s_idx1], SF_SIN_EXP[s_idx1]);
-	const int32_t c0 = to_q30(SF_SIN_MANT[c_idx0], SF_SIN_EXP[c_idx0]);
-	const int32_t c1 = to_q30(SF_SIN_MANT[c_idx1], SF_SIN_EXP[c_idx1]);
+	const int32_t s0 = SF_SIN_Q30[s_idx0];
+	const int32_t s1 = SF_SIN_Q30[s_idx1];
+	const int32_t c0 = SF_SIN_Q30[c_idx0];
+	const int32_t c1 = SF_SIN_Q30[c_idx1];
 
 	// ------------------------------------------------------------
 	// 5) Linear interpolation in Q30
@@ -1932,14 +1931,14 @@ constexpr SF_HOT SoftFloatPair SoftFloat::sincos() const noexcept
 		if (!SF_IS_CONSTEVAL()) {
 			int32_t lo_s, hi_s, lo_c, hi_c;
 			__asm__("smull %0, %1, %2, %3"
-			        : "=&r"(lo_s),
+				: "=&r"(lo_s),
 				"=&r"(hi_s)
-			        : "r"(ds),
+				: "r"(ds),
 				"r"(static_cast<int32_t>(frac)));
 			__asm__("smull %0, %1, %2, %3"
-			        : "=&r"(lo_c),
+				: "=&r"(lo_c),
 				"=&r"(hi_c)
-			        : "r"(dc),
+				: "r"(dc),
 				"r"(static_cast<int32_t>(frac)));
 
 			// (delta * frac) >> 24
@@ -1963,10 +1962,15 @@ constexpr SF_HOT SoftFloatPair SoftFloat::sincos() const noexcept
 	// ------------------------------------------------------------
 	// 6) Wrap back to SoftFloat once
 	// ------------------------------------------------------------
+	int32_t sm = sin_q30, se = -30;
+	sf_normalise_fast(sm, se);
+	int32_t cm = cos_q30, ce = -30;
+	sf_normalise_fast(cm, ce);
 	return {
-		SoftFloat(sin_q30, -30),
-		SoftFloat(cos_q30, -30)
+		from_raw(sm,se),
+		from_raw(cm,ce)
 	};
+
 }
 
 constexpr SoftFloat SoftFloat::tan() const noexcept {
@@ -2546,7 +2550,7 @@ constexpr SF_HOT SoftFloat atan2(SoftFloat y, SoftFloat x) noexcept {
 						// This is exactly Knuth's hat-q: q1_hat = floor((num_hi*B + u1) / den)
 						// using the leading digits.
 						uint32_t q1, rhat1;
-						__asm__ volatile(
+						__asm__(
 						    "udiv %0, %1, %2\n\t"
 						    : "=r"(q1) : "r"(num_hi),
 							"r"(vn1));
@@ -2569,7 +2573,7 @@ constexpr SF_HOT SoftFloat atan2(SoftFloat y, SoftFloat x) noexcept {
 
 						// ── Low digit ───────────────────────────────────────
 						uint32_t q0, rhat0;
-						__asm__ volatile(
+						__asm__(
 						    "udiv %0, %1, %2\n\t"
 						    : "=r"(q0) : "r"(un21),
 							"r"(vn1));
@@ -2613,7 +2617,7 @@ constexpr SF_HOT SoftFloat atan2(SoftFloat y, SoftFloat x) noexcept {
 				else {
 #if defined(__arm__)
 					uint32_t q;
-					__asm__ volatile(
+					__asm__(
 					    "udiv %0, %1, %2\n\t"
 					    : "=r"(q) : "r"(y_shifted),
 						"r"(x_m));

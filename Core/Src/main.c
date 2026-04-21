@@ -98,7 +98,12 @@ int main(void)
   HAL_Init();
 
   /* USER CODE BEGIN Init */
-
+	
+	/* Enable ART Accelerator / Prefetch Buffer */
+	__HAL_FLASH_PREFETCH_BUFFER_ENABLE();
+	__HAL_FLASH_INSTRUCTION_CACHE_ENABLE();
+	__HAL_FLASH_DATA_CACHE_ENABLE();
+	
   /* USER CODE END Init */
 
   /* Configure the system clock */

@@ -531,22 +531,22 @@ namespace SoftFloatTest {
 		// -------------------------------------------------------------------
 		snprintf(buf,
 			sizeof buf,
-			"Multiply  (%6d ops): %7.2f cycles/op\n",
+			"Multiply  (%6d ops): %7.2f ns/op\n",
 			N,
 			bench([&] { sink_f = (float)(a * b); })); print(buf);
 		snprintf(buf,
 			sizeof buf,
-			"Add       (%6d ops): %7.2f cycles/op\n",
+			"Add       (%6d ops): %7.2f ns/op\n",
 			N,
 			bench([&] { sink_f = (float)(a + b); })); print(buf);
 		snprintf(buf,
 			sizeof buf,
-			"Subtract  (%6d ops): %7.2f cycles/op\n",
+			"Subtract  (%6d ops): %7.2f ns/op\n",
 			N,
 			bench([&] { sink_f = (float)(a - b); })); print(buf);
 		snprintf(buf,
 			sizeof buf,
-			"Divide    (%6d ops): %7.2f cycles/op\n",
+			"Divide    (%6d ops): %7.2f ns/op\n",
 			N,
 			bench([&] { sink_f = (float)(a / b); })); print(buf);
 
@@ -555,22 +555,22 @@ namespace SoftFloatTest {
 		// -------------------------------------------------------------------
 		snprintf(buf,
 			sizeof buf,
-			"FMA       (%6d ops): %7.2f cycles/op\n",
+			"FMA       (%6d ops): %7.2f ns/op\n",
 			N,
 			bench([&] { sink_f = (float)fused_mul_add(one, two, three); })); print(buf);
 		snprintf(buf,
 			sizeof buf,
-			"FMS       (%6d ops): %7.2f cycles/op\n",
+			"FMS       (%6d ops): %7.2f ns/op\n",
 			N,
 			bench([&] { sink_f = (float)fused_mul_sub(one, two, three); })); print(buf);
 		snprintf(buf,
 			sizeof buf,
-			"FMMA      (%6d ops): %7.2f cycles/op\n",
+			"FMMA      (%6d ops): %7.2f ns/op\n",
 			N,
 			bench([&] { sink_f = (float)fused_mul_mul_add(one, two, three, d); })); print(buf);
 		snprintf(buf,
 			sizeof buf,
-			"FMMS      (%6d ops): %7.2f cycles/op\n",
+			"FMMS      (%6d ops): %7.2f ns/op\n",
 			N,
 			bench([&] { sink_f = (float)fused_mul_mul_sub(one, two, three, d); })); print(buf);
 
@@ -579,32 +579,32 @@ namespace SoftFloatTest {
 		// -------------------------------------------------------------------
 		snprintf(buf,
 			sizeof buf,
-			"sin       (%6d ops): %7.2f cycles/op\n",
+			"sin       (%6d ops): %7.2f ns/op\n",
 			N,
 			bench([&] { sink_f = (float)a.sin(); })); print(buf);
 		snprintf(buf,
 			sizeof buf,
-			"cos       (%6d ops): %7.2f cycles/op\n",
+			"cos       (%6d ops): %7.2f ns/op\n",
 			N,
 			bench([&] { sink_f = (float)a.cos(); })); print(buf);
 		snprintf(buf,
 			sizeof buf,
-			"tan       (%6d ops): %7.2f cycles/op\n",
+			"tan       (%6d ops): %7.2f ns/op\n",
 			N,
 			bench([&] { sink_f = (float)a.tan(); })); print(buf);
 		snprintf(buf,
 			sizeof buf,
-			"asin      (%6d ops): %7.2f cycles/op\n",
+			"asin      (%6d ops): %7.2f ns/op\n",
 			N,
 			bench([&] { sink_f = (float)half.asin(); })); print(buf);
 		snprintf(buf,
 			sizeof buf,
-			"acos      (%6d ops): %7.2f cycles/op\n",
+			"acos      (%6d ops): %7.2f ns/op\n",
 			N,
 			bench([&] { sink_f = (float)half.acos(); })); print(buf);
 		snprintf(buf,
 			sizeof buf,
-			"atan2     (%6d ops): %7.2f cycles/op\n",
+			"atan2     (%6d ops): %7.2f ns/op\n",
 			N,
 			bench([&] { sink_f = (float)atan2(a, b); })); print(buf);
 
@@ -613,17 +613,17 @@ namespace SoftFloatTest {
 		// -------------------------------------------------------------------
 		snprintf(buf,
 			sizeof buf,
-			"sinh      (%6d ops): %7.2f cycles/op\n",
+			"sinh      (%6d ops): %7.2f ns/op\n",
 			N,
 			bench([&] { sink_f = (float)one.sinh(); })); print(buf);
 		snprintf(buf,
 			sizeof buf,
-			"cosh      (%6d ops): %7.2f cycles/op\n",
+			"cosh      (%6d ops): %7.2f ns/op\n",
 			N,
 			bench([&] { sink_f = (float)one.cosh(); })); print(buf);
 		snprintf(buf,
 			sizeof buf,
-			"tanh      (%6d ops): %7.2f cycles/op\n",
+			"tanh      (%6d ops): %7.2f ns/op\n",
 			N,
 			bench([&] { sink_f = (float)one.tanh(); })); print(buf);
 
@@ -632,27 +632,27 @@ namespace SoftFloatTest {
 		// -------------------------------------------------------------------
 		snprintf(buf,
 			sizeof buf,
-			"exp       (%6d ops): %7.2f cycles/op\n",
+			"exp       (%6d ops): %7.2f ns/op\n",
 			N,
 			bench([&] { sink_f = (float)one.exp(); })); print(buf);
 		snprintf(buf,
 			sizeof buf,
-			"log       (%6d ops): %7.2f cycles/op\n",
+			"log       (%6d ops): %7.2f ns/op\n",
 			N,
 			bench([&] { sink_f = (float)two.log(); })); print(buf);
 		snprintf(buf,
 			sizeof buf,
-			"log2      (%6d ops): %7.2f cycles/op\n",
+			"log2      (%6d ops): %7.2f ns/op\n",
 			N,
 			bench([&] { sink_f = (float)two.log2(); })); print(buf);
 		snprintf(buf,
 			sizeof buf,
-			"log10     (%6d ops): %7.2f cycles/op\n",
+			"log10     (%6d ops): %7.2f ns/op\n",
 			N,
 			bench([&] { sink_f = (float)two.log10(); })); print(buf);
 		snprintf(buf,
 			sizeof buf,
-			"pow       (%6d ops): %7.2f cycles/op\n",
+			"pow       (%6d ops): %7.2f ns/op\n",
 			N,
 			bench([&] { sink_f = (float)two.pow(three); })); print(buf);
 
@@ -661,12 +661,12 @@ namespace SoftFloatTest {
 		// -------------------------------------------------------------------
 		snprintf(buf,
 			sizeof buf,
-			"sqrt      (%6d ops): %7.2f cycles/op\n",
+			"sqrt      (%6d ops): %7.2f ns/op\n",
 			N,
 			bench([&] { sink_f = (float)two.sqrt(); })); print(buf);
 		snprintf(buf,
 			sizeof buf,
-			"inv_sqrt  (%6d ops): %7.2f cycles/op\n",
+			"inv_sqrt  (%6d ops): %7.2f ns/op\n",
 			N,
 			bench([&] { sink_f = (float)two.inv_sqrt(); })); print(buf);
 
@@ -675,32 +675,32 @@ namespace SoftFloatTest {
 		// -------------------------------------------------------------------
 		snprintf(buf,
 			sizeof buf,
-			"floor     (%6d ops): %7.2f cycles/op\n",
+			"floor     (%6d ops): %7.2f ns/op\n",
 			N,
 			bench([&] { sink_f = (float)a.floor(); })); print(buf);
 		snprintf(buf,
 			sizeof buf,
-			"ceil      (%6d ops): %7.2f cycles/op\n",
+			"ceil      (%6d ops): %7.2f ns/op\n",
 			N,
 			bench([&] { sink_f = (float)a.ceil(); })); print(buf);
 		snprintf(buf,
 			sizeof buf,
-			"trunc     (%6d ops): %7.2f cycles/op\n",
+			"trunc     (%6d ops): %7.2f ns/op\n",
 			N,
 			bench([&] { sink_f = (float)a.trunc(); })); print(buf);
 		snprintf(buf,
 			sizeof buf,
-			"round     (%6d ops): %7.2f cycles/op\n",
+			"round     (%6d ops): %7.2f ns/op\n",
 			N,
 			bench([&] { sink_f = (float)a.round(); })); print(buf);
 		snprintf(buf,
 			sizeof buf,
-			"fract     (%6d ops): %7.2f cycles/op\n",
+			"fract     (%6d ops): %7.2f ns/op\n",
 			N,
 			bench([&] { sink_f = (float)a.fract(); })); print(buf);
 		snprintf(buf,
 			sizeof buf,
-			"modf      (%6d ops): %7.2f cycles/op\n",
+			"modf      (%6d ops): %7.2f ns/op\n",
 			N,
 			bench([&] { auto p = a.modf(); sink_f = (float)p.intpart; })); print(buf);
 
@@ -709,27 +709,27 @@ namespace SoftFloatTest {
 		// -------------------------------------------------------------------
 		snprintf(buf,
 			sizeof buf,
-			"abs       (%6d ops): %7.2f cycles/op\n",
+			"abs       (%6d ops): %7.2f ns/op\n",
 			N,
 			bench([&] { sink_f = (float)(-a).abs(); })); print(buf);
 		snprintf(buf,
 			sizeof buf,
-			"copysign  (%6d ops): %7.2f cycles/op\n",
+			"copysign  (%6d ops): %7.2f ns/op\n",
 			N,
 			bench([&] { sink_f = (float)a.copysign(b); })); print(buf);
 		snprintf(buf,
 			sizeof buf,
-			"fmod      (%6d ops): %7.2f cycles/op\n",
+			"fmod      (%6d ops): %7.2f ns/op\n",
 			N,
 			bench([&] { sink_f = (float)a.fmod(b); })); print(buf);
 		snprintf(buf,
 			sizeof buf,
-			"hypot     (%6d ops): %7.2f cycles/op\n",
+			"hypot     (%6d ops): %7.2f ns/op\n",
 			N,
 			bench([&] { sink_f = (float)hypot(three, d); })); print(buf);
 		snprintf(buf,
 			sizeof buf,
-			"lerp      (%6d ops): %7.2f cycles/op\n",
+			"lerp      (%6d ops): %7.2f ns/op\n",
 			N,
 			bench([&] { sink_f = (float)lerp(zero, two, half); })); print(buf);
 
@@ -738,12 +738,12 @@ namespace SoftFloatTest {
 		// -------------------------------------------------------------------
 		snprintf(buf,
 			sizeof buf,
-			"compare < (%6d ops): %7.2f cycles/op\n",
+			"compare < (%6d ops): %7.2f ns/op\n",
 			N,
 			bench([&] { sink_b = a < b; })); print(buf);
 		snprintf(buf,
 			sizeof buf,
-			"compare ==(%6d ops): %7.2f cycles/op\n",
+			"compare ==(%6d ops): %7.2f ns/op\n",
 			N,
 			bench([&] { sink_b = a == a; })); print(buf);
 
@@ -752,12 +752,12 @@ namespace SoftFloatTest {
 		// -------------------------------------------------------------------
 		snprintf(buf,
 			sizeof buf,
-			"shift <<  (%6d ops): %7.2f cycles/op\n",
+			"shift <<  (%6d ops): %7.2f ns/op\n",
 			N,
 			bench([&] { sink_f = (float)(a << 2); })); print(buf);
 		snprintf(buf,
 			sizeof buf,
-			"shift >>  (%6d ops): %7.2f cycles/op\n",
+			"shift >>  (%6d ops): %7.2f ns/op\n",
 			N,
 			bench([&] { sink_f = (float)(a >> 2); })); print(buf);
 
@@ -766,22 +766,22 @@ namespace SoftFloatTest {
 		// -------------------------------------------------------------------
 		snprintf(buf,
 			sizeof buf,
-			"to_float  (%6d ops): %7.2f cycles/op\n",
+			"to_float  (%6d ops): %7.2f ns/op\n",
 			N,
 			bench([&] { sink_f = (float)a; })); print(buf);
 		snprintf(buf,
 			sizeof buf,
-			"to_int32  (%6d ops): %7.2f cycles/op\n",
+			"to_int32  (%6d ops): %7.2f ns/op\n",
 			N,
 			bench([&] { sink_i = (int32_t)a; })); print(buf);
 		snprintf(buf,
 			sizeof buf,
-			"from_float(%6d ops): %7.2f cycles/op\n",
+			"from_float(%6d ops): %7.2f ns/op\n",
 			N,
 			bench([&] { SoftFloat tmp(fa); sink_f = (float)tmp; })); print(buf);
 		snprintf(buf,
 			sizeof buf,
-			"from_int  (%6d ops): %7.2f cycles/op\n",
+			"from_int  (%6d ops): %7.2f ns/op\n",
 			N,
 			bench([&] { SoftFloat tmp(42); sink_f = (float)tmp; })); print(buf);
 
@@ -792,7 +792,7 @@ namespace SoftFloatTest {
 		SoftFloat b1(5.f), b2(6.f), b3(7.f), b4(8.f);
 		snprintf(buf,
 			sizeof buf,
-			"Dot4      (%6d ops): %7.2f cycles/op\n",
+			"Dot4      (%6d ops): %7.2f ns/op\n",
 			N,
 			bench([&] { sink_f = (float)(a1 * b1 + a2 * b2 + a3 * b3 + a4 * b4); })); print(buf);
 
