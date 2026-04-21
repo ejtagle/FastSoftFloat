@@ -1417,21 +1417,21 @@ constexpr SoftFloat& SoftFloat::operator*=(SoftFloat r) noexcept {
 // =========================================================================
 // fused_mul_mul_add — uses sf_normalise_fast, verifies SMLAL opportunity
 // =========================================================================
-[[nodiscard]] constexpr SF_HOT SoftFloat fused_mul_mul_add(SoftFloat a, SoftFloat b,
-	SoftFloat c, SoftFloat d) noexcept
+[[nodiscard]] constexpr SF_HOT SoftFloat fused_mul_mul_add(SoftFloat a,
+	SoftFloat b,
+	SoftFloat c,
+	SoftFloat d) noexcept
 {
-	// R3-6: one branch covers all zero-input cases on the hot path
-	if (UNLIKELY(!a.mantissa || !b.mantissa || !c.mantissa || !d.mantissa)) {
-		bool abz = (!a.mantissa || !b.mantissa);
-		bool cdz = (!c.mantissa || !d.mantissa);
+	// Fast zero propagation – use mul_plain to bypass the sf_mul_expr proxy
+	bool abz = (!a.mantissa || !b.mantissa);
+	bool cdz = (!c.mantissa || !d.mantissa);
+	if (UNLIKELY(abz || cdz)) {
 		if (abz && cdz) return SoftFloat::zero();
-		if (abz)        return c * d;
-		if (cdz)        return a * b;
-		// One of the four is zero but both pairs are non-zero: impossible.
-		// (If a==0 then abz==true; similarly for others. Reach here never.)
+		if (abz)        return SoftFloat::mul_plain(c, d);
+		return SoftFloat::mul_plain(a, b);
 	}
 
-	// Two multiplies; GCC -O2 typically fuses the add into SMLAL here.
+	// Two independent SMULLs – Cortex-M3 can issue these back-to-back
 	int64_t p1 = static_cast<int64_t>(a.mantissa) * static_cast<int64_t>(b.mantissa);
 	int32_t pm1 = static_cast<int32_t>(p1 >> 29);
 	int32_t pe1 = a.exponent + b.exponent + 29;
@@ -1440,7 +1440,7 @@ constexpr SoftFloat& SoftFloat::operator*=(SoftFloat r) noexcept {
 	int32_t pm2 = static_cast<int32_t>(p2 >> 29);
 	int32_t pe2 = c.exponent + d.exponent + 29;
 
-	// R3-3: XOR trick for both norm steps
+	// Branchless 1-bit normalisation of each product
 	uint32_t n1 = static_cast<uint32_t>(pm1 ^ (pm1 >> 31)) >> 30;
 	pm1 >>= n1; pe1 += static_cast<int32_t>(n1);
 
@@ -1448,27 +1448,46 @@ constexpr SoftFloat& SoftFloat::operator*=(SoftFloat r) noexcept {
 	pm2 >>= n2; pe2 += static_cast<int32_t>(n2);
 
 	int d_exp = pe1 - pe2;
-	if (d_exp >= 31) return SoftFloat::from_raw(pm1, pe1);
-	if (d_exp <= -31) return SoftFloat::from_raw(pm2, pe2);
 
-	int32_t exp;
-	if (d_exp == 0) {
-		int32_t  s = pm1 + pm2;
-		if (UNLIKELY(s == 0)) return SoftFloat::zero();
-		uint32_t ov = static_cast<uint32_t>(s ^ (s >> 31)) >> 30;
-		s >>= static_cast<int>(ov);
-		pe1 += static_cast<int32_t>(ov);
-		sf_normalise_fast(s, pe1);
-		return SoftFloat::from_raw(s, pe1);
+	// Early out: one term dominates by >= 31 bits → the other is 0 or ±1 after shift
+	if (d_exp >= 31) {
+		if (UNLIKELY(pe1 > 127)) return SoftFloat::from_raw(pm1 >= 0 ? (1 << 29) : -(1 << 29), 127);
+		if (UNLIKELY(pe1 < -128)) return SoftFloat::zero();
+		return SoftFloat::from_raw(pm1, pe1);
 	}
-	if (d_exp > 0) { pm2 >>= d_exp;  exp = pe1; }
-	else { pm1 >>= -d_exp; exp = pe2; }
+	if (d_exp <= -31) {
+		if (UNLIKELY(pe2 > 127)) return SoftFloat::from_raw(pm2 >= 0 ? (1 << 29) : -(1 << 29), 127);
+		if (UNLIKELY(pe2 < -128)) return SoftFloat::zero();
+		return SoftFloat::from_raw(pm2, pe2);
+	}
 
-	int32_t s = pm1 + pm2;
-	if (UNLIKELY(s == 0)) return SoftFloat::zero();
-	exp = sf_sat_exp(exp);
-	sf_normalise_fast(s, exp);
-	return SoftFloat::from_raw(s, exp);
+	// Same exponent: no alignment shift needed
+	if (d_exp == 0) {
+		return SoftFloat::sf_finish_addsub(pm1 + pm2, pe1);
+	}
+
+	// Align smaller term to the larger exponent
+	int32_t exp;
+	if (d_exp > 0) {
+		pm2 >>= d_exp;
+		exp = pe1;
+	}
+	else {
+		pm1 >>= -d_exp;
+		exp = pe2;
+	}
+
+	// sf_finish_addsub assumes the exponent is in [-128,127] for its fast paths.
+	// If an intermediate product overflowed/underflowed, take the safe route.
+	if (UNLIKELY(exp > 127 || exp < -128)) {
+		int32_t s = pm1 + pm2;
+		if (UNLIKELY(s == 0)) return SoftFloat::zero();
+		int32_t re = exp;
+		sf_normalise_fast(s, re);
+		return SoftFloat::from_raw(s, re);
+	}
+
+	return SoftFloat::sf_finish_addsub(pm1 + pm2, exp);
 }
 
 // fused_mul_mul_sub: returns  a*b - c*d
