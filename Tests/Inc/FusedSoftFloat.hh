@@ -2453,7 +2453,7 @@ constexpr SF_HOT SoftFloat SoftFloat::exp() const noexcept
 {
 	if (UNLIKELY(mantissa == 0)) return one();
 
-	static constexpr int32_t INV_LN2_M = 0x2E2A8ECB; // 1/ln(2) in Q29  (= round(1/ln2 · 2²⁹))
+	constexpr int32_t INV_LN2_M = 0x2E2A8ECB; // 1/ln(2) in Q29  (= round(1/ln2 · 2²⁹))
 
 	// ── Step 1: one SMULL — the only multiply we need ────────────────────────
 	// kprod × 2^(exponent − 29)  =  x / ln2   (exact in 64-bit fixed-point)
@@ -2861,21 +2861,29 @@ constexpr SoftFloat SoftFloat::pow(SoftFloat y) const noexcept {
 	if (mantissa == 0) return y.mantissa == 0 ? one() : zero();
 	if (y.mantissa == 0) return one();
 
-	// --- 1. Practically-free guards for common algebraic exponents ---
-	if (y == SoftFloat::two())          { SoftFloat t = *this; return t * t; }
-	if (y == SoftFloat::three())        { SoftFloat t = *this; return t * t * t; }
-	if (y == SoftFloat::four())         { SoftFloat t = *this; t = t * t; return t * t; }
-	if (y == SoftFloat::neg_one())      return reciprocal();
-	if (y == half())                    return sqrt();
-	if (y == -half())                   return inv_sqrt();
+	// --- Literal fast paths (two integer compares each) ---
+	if (y == one())       return *this;
+	if (y == two())       { SoftFloat t = *this; return SoftFloat::mul_plain(t, t); }
+	if (y == three())     { SoftFloat t = *this; return SoftFloat::mul_plain(t, SoftFloat::mul_plain(t, t)); }
+	if (y == four())      { SoftFloat t = *this; t = SoftFloat::mul_plain(t, t); return SoftFloat::mul_plain(t, t); }
+	if (y == neg_one())   return reciprocal();
+	if (y == half())      return sqrt();
+	if (y == -half())     return inv_sqrt();
 
-	// --- 2. Zero-cost integer detection --------------------------------
-	// A normalised SoftFloat is an integer iff the lower (-exponent) bits
-	// of abs(mantissa) are all zero.  No temporaries, no CLZ.
+	// 1.5 = x * sqrt(x)
+	if (y.mantissa == 0x30000000 && y.exponent == -29) {
+		SoftFloat t = sqrt();
+		return SoftFloat::mul_plain(*this, t);
+	}
+	// 0.25 = sqrt(sqrt(x))
+	if (y.mantissa == 0x20000000 && y.exponent == -31)
+		return sqrt().sqrt();
+
+	// --- Zero-cost integer detection (bit-mask on mantissa) ---
 	int32_t n = 0;
 	bool is_int = false;
 	if (y.exponent < 0) {
-		int32_t shift = -y.exponent; // 1 … 30 for sensible numbers
+		int32_t shift = -y.exponent; // 1 … 30
 		if (shift <= 30) {
 			uint32_t a = sf_abs32(y.mantissa);
 			uint32_t mask = (1u << shift) - 1u;
@@ -2886,27 +2894,29 @@ constexpr SoftFloat SoftFloat::pow(SoftFloat y) const noexcept {
 			}
 		}
 	}
-	// (exponent >= 0 means value >= 2^29; too large for a loop, fall through)
 
 	if (is_int) {
 		if (n == 0) return one();
 		if (n == 1) return *this;
+		if (n == -1) return reciprocal();
 
 		bool neg = n < 0;
-		uint32_t un = neg ? static_cast<uint32_t>(-(static_cast<int64_t>(n)))
-		                  : static_cast<uint32_t>(n);
+		uint32_t un = neg
+		    ? static_cast<uint32_t>(-(static_cast<int64_t>(n)))
+		    : static_cast<uint32_t>(n);
 
-		// --- 3. Unrolled hot small integers (covers 90 % of real cases) ---
-		if (un == 2) { SoftFloat t = *this; return t * t; }
-		if (un == 3) { SoftFloat t = *this; return t * t * t; }
-		if (un == 4) { SoftFloat t = *this; t = t * t; return t * t; }
+		// Early saturation (avoid useless loops)
+		if (exponent > 0 && un > 127u / static_cast<uint32_t>(exponent))
+			return from_raw(mantissa > 0 ? (1 << 29) : -(1 << 29), 127);
+		if (exponent < 0 && un > 128u / static_cast<uint32_t>(-exponent))
+			return zero();
 
-		// --- 4. Generic exponentiation by squaring -----------------------
 		SoftFloat result = one();
 		SoftFloat base   = *this;
 		for (; un; un >>= 1) {
-			if (un & 1u) result *= base;
-			base *= base;
+			if (un & 1u) result = SoftFloat::mul_plain(result, base);
+			if (un == 1u) break;                   // final square would be discarded
+			base = SoftFloat::mul_plain(base, base);
 		}
 		return neg ? result.reciprocal() : result;
 	}
