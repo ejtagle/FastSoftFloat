@@ -525,30 +525,26 @@ public:
 		int32_t rm, re;
 
 		if (LIKELY(d == 0)) {
-			rm = a.mantissa + b.mantissa;
 			re = a.exponent;
-			if (UNLIKELY(rm == 0)) return zero();
 
-			uint32_t ab = sf_abs32(rm);
-
-			// Hot path: already normalised (bit29 set, bit30 clear)
-			if (LIKELY((ab & 0x60000000u) == 0x20000000u)) {
-				return from_raw(rm, re);          // re is still in [-128,127]
-			}
-
-			// One-bit overflow into bit30 (same-sign addition)
-			if (ab & 0x40000000u) {
-				rm >>= 1;
-				if (UNLIKELY(++re > 127)) re = 127; // saturate only when needed
+			// Matched exponents: behaviour is sign-determined.
+			//   same sign      → addition of magnitudes → guaranteed 1-bit overflow
+			//   opposite signs → subtraction of magnitudes → guaranteed cancellation (or zero)
+			if ((a.mantissa ^ b.mantissa) >= 0) {
+				rm = a.mantissa + b.mantissa; // e.g. 0x20000000 + 0x20000000 = 0x40000000
+				rm >>= 1; // arithmetic shift: exact 1-bit normalise
+				if (UNLIKELY(++re > 127)) re = 127;
 				return from_raw(rm, re);
 			}
 
-			// Cancellation: full renormalise (rare)
+			// Opposite signs: never normalised, always needs left-shift renormalisation.
+			rm = a.mantissa + b.mantissa;
+			if (UNLIKELY(rm == 0)) return zero();
 			sf_normalise_fast(rm, re);
 			return from_raw(rm, re);
 		}
 
-		// Unequal exponents: align the smaller operand
+		// Unequal exponents: align smaller operand
 		if (d > 0) {
 			rm = a.mantissa + (b.mantissa >> d);
 			re = a.exponent;
@@ -593,7 +589,7 @@ public:
 	// Sub — constexpr
 	// ------------------------------------------------------------------
 	[[nodiscard]] constexpr SF_HOT SF_INLINE SF_FLATTEN
-friend SoftFloat operator-(SoftFloat a, SoftFloat b) noexcept
+	friend SoftFloat operator-(SoftFloat a, SoftFloat b) noexcept
 	{
 		if (UNLIKELY(!b.mantissa)) return a;
 		if (UNLIKELY(!a.mantissa)) return -b;
