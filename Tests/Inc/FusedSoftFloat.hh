@@ -593,8 +593,8 @@ public:
 	// Sub — constexpr
 	// ------------------------------------------------------------------
 	[[nodiscard]] constexpr SF_HOT SF_INLINE SF_FLATTEN
-		friend SoftFloat operator-(SoftFloat a, SoftFloat b) noexcept {
-
+friend SoftFloat operator-(SoftFloat a, SoftFloat b) noexcept
+	{
 		if (UNLIKELY(!b.mantissa)) return a;
 		if (UNLIKELY(!a.mantissa)) return -b;
 
@@ -605,32 +605,26 @@ public:
 		int32_t rm, re;
 
 		if (LIKELY(d == 0)) {
-			// Same exponent: direct signed subtraction.
-			rm = a.mantissa - b.mantissa;
 			re = a.exponent;
 
+			// Matched exponents: behaviour is sign-determined.
+			//   opposite signs → addition of magnitudes → guaranteed 1-bit overflow
+			//   same sign      → subtraction of magnitudes → guaranteed cancellation (or zero)
+			if ((a.mantissa ^ b.mantissa) < 0) {
+				rm = a.mantissa - b.mantissa; // e.g. 0x20000000 - (-0x20000000) = 0x40000000
+				rm >>= 1; // arithmetic shift: exact 1-bit normalise
+				if (UNLIKELY(++re > 127)) re = 127;
+				return from_raw(rm, re);
+			}
+
+			// Same sign: never normalised, always needs left-shift renormalisation.
+			rm = a.mantissa - b.mantissa;
 			if (UNLIKELY(rm == 0)) return zero();
-
-			uint32_t ab = sf_abs32(rm);
-
-			// Already normalized?
-			if (LIKELY((ab & 0x60000000u) == 0x20000000u)) {
-				return from_raw(rm, sf_sat_exp_fast(re));
-			}
-
-			// Overflow into bit30? (Possible only if abs(rm) >= 2^30)
-			if (ab & 0x40000000u) {
-				rm >>= 1;              // arithmetic shift preserves sign
-				re += 1;
-				return from_raw(rm, sf_sat_exp_fast(re));
-			}
-
-			// Otherwise cancellation happened: need full renormalization.
 			sf_normalise_fast(rm, re);
 			return from_raw(rm, re);
 		}
 
-		// Unequal exponents: align smaller operand with arithmetic shift.
+		// Unequal exponents: align smaller operand
 		if (d > 0) {
 			rm = a.mantissa - (b.mantissa >> d);
 			re = a.exponent;
@@ -640,8 +634,21 @@ public:
 			re = b.exponent;
 		}
 
-		return sf_finish_addsub(rm, re);
+		if (UNLIKELY(rm == 0)) return zero();
+
+		uint32_t ab = sf_abs32(rm);
+		if (LIKELY((ab & 0x60000000u) == 0x20000000u)) {
+			return from_raw(rm, re);
+		}
+		if (ab & 0x40000000u) {
+			rm >>= 1;
+			if (UNLIKELY(++re > 127)) re = 127;
+			return from_raw(rm, re);
+		}
+		sf_normalise_fast(rm, re);
+		return from_raw(rm, re);
 	}
+
 	[[nodiscard]] constexpr SF_HOT SF_INLINE SF_FLATTEN
 		friend SoftFloat operator-(SoftFloat a, float b) noexcept {
 		return a - SoftFloat(b);
