@@ -194,11 +194,11 @@ constexpr SF_INLINE void sf_normalise_fast(int32_t& m, int32_t& e) noexcept
 }
 
 
-
-// sf_recip — Newton-refined reciprocal, now constexpr.
-// Returns Y ≈ 2^60 / b  for b in [2^29, 2^30).
-// Uses one UMULL Newton step: ~14 cycles on Cortex-M3.
-[[nodiscard]] constexpr SF_CONST SF_INLINE uint64_t sf_recip(uint32_t b) noexcept
+// =========================================================================
+// sf_recip32 — 32-bit narrowed reciprocal, constexpr, no 64-bit shifts
+// Returns Y ≈ 2^60 / b,  Y ∈ [2^30, 2^31], so it fits in uint32_t.
+// =========================================================================
+[[nodiscard]] constexpr SF_CONST SF_INLINE uint32_t sf_recip32(uint32_t b) noexcept
 {
 
 	// =========================================================================
@@ -274,16 +274,47 @@ constexpr SF_INLINE void sf_normalise_fast(int32_t& m, int32_t& e) noexcept
 		0x41041041u,0x40F39161u,0x40E31ADEu,0x40D2ACB1u,0x40C246D4u,0x40B1E941u,0x40A193F1u,0x409146DFu,
 		0x40810204u,0x4070C559u,0x406090D9u,0x4050647Du,0x40404040u,0x4030241Bu,0x40201008u,0x40100401u,
 	};
-
-	uint32_t b2 = b << 1;                      // [2^29,2^30) → [2^30,2^31)
-	uint32_t idx = (b2 >> 21) & 0x1FFu;         // 9‑bit index into table
+	
+	uint32_t b2 = b << 1;
+	uint32_t idx = (b2 >> 21) & 0x1FFu;
 	uint32_t Y = recip_tab[idx];
 
+#if defined(__arm__)
+	if (!SF_IS_CONSTEVAL()) {
+		uint32_t lo, hi;
+
+		// bY = b2 * Y
+		__asm__("umull %0, %1, %2, %3"
+		        : "=&r"(lo), "=&r"(hi)
+		        : "r"(b2), "r"(Y));
+
+		// err = ((1<<61) - bY) >> 30  without 64-bit shifts
+		uint32_t q30 = (hi << 2) | (lo >> 30);
+		uint32_t r30 = lo & 0x3FFFFFFFu;
+		int32_t  err = static_cast<int32_t>(0x80000000u - q30 - (r30 ? 1u : 0u));
+
+		// dY = (Y * err) >> 31
+		uint32_t abs_err = static_cast<uint32_t>(err < 0 ? -err : err);
+		__asm__("umull %0, %1, %2, %3"
+		        : "=&r"(lo), "=&r"(hi)
+		        : "r"(Y), "r"(abs_err));
+		uint32_t dY_mag = (hi << 1) | (lo >> 31);
+		int32_t  dY = (err < 0) ? -static_cast<int32_t>(dY_mag)
+		                        :  static_cast<int32_t>(dY_mag);
+
+		uint32_t result = Y;
+		if (dY < 0) result -= static_cast<uint32_t>(-dY);
+		else        result += static_cast<uint32_t>( dY);
+		return result;
+	}
+#endif
+
+    // Portable / constexpr fallback
 	uint64_t bY = static_cast<uint64_t>(b2) * Y;
 	int64_t  err64 = static_cast<int64_t>(1ULL << 61) - static_cast<int64_t>(bY);
 	int32_t  err = static_cast<int32_t>(err64 >> 30);
 	int64_t  dY64 = (static_cast<int64_t>(Y) * err) >> 31;
-	return static_cast<uint64_t>(static_cast<int64_t>(Y) + dY64);
+	return static_cast<uint32_t>(static_cast<int64_t>(Y) + dY64);
 }
 
 // ---------------------------------------------------------------------
@@ -706,131 +737,52 @@ public:
 	}
 	
 #else
-	[[nodiscard]] constexpr SF_HOT SoftFloat operator/(SoftFloat rhs) const noexcept {
+	// =========================================================================
+	// operator/ — unified: sf_recip32 + one multiply, both paths identical logic
+	// =========================================================================
+	[[nodiscard]] constexpr SF_HOT SoftFloat operator/(SoftFloat rhs) const noexcept
+	{
 		if (UNLIKELY(!rhs.mantissa))
 			return from_raw(mantissa >= 0 ? (1 << 29) : -(1 << 29), 127);
 		if (UNLIKELY(!mantissa)) return zero();
 
 		bool     neg = (mantissa ^ rhs.mantissa) < 0;
-		uint32_t ua = sf_abs32(mantissa);
-		uint32_t ub = sf_abs32(rhs.mantissa);
+		uint32_t ua  = sf_abs32(mantissa);
+		uint32_t ub  = sf_abs32(rhs.mantissa);
 
-		// Compile‑time path (unchanged)
-		if (SF_IS_CONSTEVAL()) {
+		// 1/ub ≈ Y / 2^60,  Y ∈ [2^30, 2^31]
+		uint32_t Y = sf_recip32(ub);
 
-			uint64_t Y = sf_recip(ub);
-			uint64_t q64 = static_cast<uint64_t>(ua) * Y;
+		uint32_t qm;
+		int32_t  qe = exponent - rhs.exponent - 30;
 
-			uint32_t qm32 = static_cast<uint32_t>(q64 >> 30);
-			int32_t  qe = exponent - rhs.exponent - 30;
-
-			// qm32 in [2^28, 2^30). Branchless 1-bit adjust:
-			uint32_t hi = qm32 >> 30;
-			uint32_t lo = (~qm32 >> 29) & 1u & ~hi;
-			qm32 = (qm32 >> hi) << lo;
-			qe += static_cast<int32_t>(hi) - static_cast<int32_t>(lo);
-
-			int32_t qm = neg ? -static_cast<int32_t>(qm32) : static_cast<int32_t>(qm32);
-
-			qe = sf_sat_exp(qe);           // exponent may exceed 127; clamp it
-			return from_raw(qm, qe);       // mantissa already normalised
-		}
-
-		// Compute floor((ua << 30) / ub) using exactly two UDIV instructions.
-		//
-		// Rewrite as floor((ua << 32) / (ub << 2)):
-		//   ub ∈ [2^29, 2^30)  ⟹  ub << 2 ∈ [2^31, 2^32) always.
-		//   The top bit is guaranteed set by our normalisation invariant,
-		//   so the shift is always exactly 2 — no CLZ required.
-		//
-		// Then apply Knuth TAOCP Vol.2 §4.3.1 Algorithm D for a single
-		// normalised-word divisor, yielding two 16-bit quotient digits
-		// with one UDIV each.  All intermediate products are within
-		// uint32_t range (proofs in comments below).
-		//
-		// On Cortex-M3, each UDIV costs 2–12 cycles vs. the ~60+ cycles
-		// of __aeabi_uldivmod.  The correction blocks run at most twice
-		// per digit; the q >= 2^16 guard is statically unreachable
-		// (ua < 2^30 and vn1 >= 2^15 ⟹ q1 < 2^15 always).
 #if defined(__arm__)
-		{
-			uint32_t v = ub << 2;          // normalised divisor ∈ [2^31, 2^32)
-			uint32_t vn1 = v >> 16;          // high half ∈ [2^15, 2^16)
-			uint32_t vn0 = v & 0xFFFFu;     // low  half ∈ [0,    2^16)
-
-			// ── High quotient digit ─────────────────────────────────────
-			//   Dividend high word = ua (≡ the "ua:0" 64-bit value's top 32 bits).
-			//   q1 = floor(ua / vn1).  ua < 2^30, vn1 >= 2^15 ⟹ q1 < 2^15.
-			uint32_t q1, rhat;
-			__asm__ (
-				"udiv %0, %1, %2\n\t" 
-				: "=r"(q1) 
-				: "r"(ua), "r"(vn1)
-			);  // UDIV #1
-			rhat = ua - q1 * vn1;            // MLS; remainder mod vn1, < vn1 < 2^16
-
-			// Knuth correction: q1_hat may exceed the true digit by at most 2.
-			// q1 * vn0 < 2^31 (q1<2^15, vn0<2^16); rhat<<16 < 2^32 (rhat<2^16): no overflow.
-			if (q1 * vn0 > (rhat << 16)) {
-				--q1; rhat += vn1;
-				if (q1 * vn0 > (rhat << 16)) --q1; // bare second check
-			}
-			// un21 = ua*2^16 - q1*v, computed overflow-free via the remainder.
-			// rhat < 2^16 here ⟹ (rhat<<16) < 2^32; q1*vn0 ≤ (rhat<<16) ⟹ result ≥ 0.
-			uint32_t un21 = (rhat << 16) - q1 * vn0;   // ∈ [0, v)
-
-			// ── Low quotient digit ──────────────────────────────────────
-			//   un21 < v ⟹ q0 = un21/vn1 < v/vn1 = v/(v>>16) ≤ 65535 < 2^16.
-			//   q0*vn0 ≤ 65535*65535 = 2^32 - 131071 < 2^32: no overflow.
-			uint32_t q0;
-			__asm__ (
-				"udiv %0, %1, %2\n\t" 
-				: "=r"(q0) 
-				: "r"(un21), "r"(vn1)
-			);  // UDIV #2
-			rhat = un21 - q0 * vn1;
-
-			if (q0 * vn0 > (rhat << 16)) {
-				--q0; rhat += vn1;
-				if (q0 * vn0 > (rhat << 16)) --q0; // bare second check
-			}
-
-			uint32_t qm = (q1 << 16) | q0;  // ∈ [2^29, 2^31)
-			int32_t  qe = exponent - rhs.exponent - 30;
-
-			if (qm & 0x40000000u) {   // bit30 set -> need right shift by 1
-				qm >>= 1;
-				qe += 1;
-			}
-			// No left shift possible because qm >= 2^29 always
-
-			qe = sf_sat_exp(qe);
-			int32_t qm_signed = neg ? -static_cast<int32_t>(qm) : static_cast<int32_t>(qm);
-			return from_raw(qm_signed, qe);
-		} 
-#else
-		// Non-ARM fallback (host-side build / unit tests).
-		{
-			uint32_t qm = static_cast<uint32_t>((static_cast<uint64_t>(ua) << 30) / ub);
-			int32_t  qe = exponent - rhs.exponent - 30;
-
-			// Normalise mantissa to [2^29, 2^30)
-			int lz = sf_clz(qm);
-			int shift = lz - 2;
-			if (shift > 0) {
-				qm <<= shift;
-				qe -= shift;
-			}
-			else if (shift < 0) {
-				qm >>= -shift;
-				qe += -shift;
-			}
-
-			qe = sf_sat_exp(qe);
-			int32_t qm_signed = neg ? -static_cast<int32_t>(qm) : static_cast<int32_t>(qm);
-			return from_raw(qm_signed, qe);
+		if (!SF_IS_CONSTEVAL()) {
+			uint32_t lo, hi;
+			// qm = (ua * Y) >> 30
+			__asm__("umull %0, %1, %2, %3"
+			        : "=&r"(lo),
+				"=&r"(hi)
+			        : "r"(ua),
+				"r"(Y));
+			qm = (hi << 2) | (lo >> 30);
 		}
+		else
 #endif
+		{
+			uint64_t q64 = static_cast<uint64_t>(ua) * static_cast<uint64_t>(Y);
+			qm = static_cast<uint32_t>(q64 >> 30);
+		}
+
+		// Branchless normalise to [2^29, 2^30)
+		uint32_t rshift = qm >> 30; // 1 if ≥ 2^30
+		uint32_t lshift = (~qm >> 29) & 1u & ~rshift; // 1 if < 2^29
+		qm = (qm >> rshift) << lshift;
+		qe += static_cast<int32_t>(rshift) - static_cast<int32_t>(lshift);
+
+		qe = sf_sat_exp(qe);
+		int32_t qm_signed = neg ? -static_cast<int32_t>(qm) : static_cast<int32_t>(qm);
+		return from_raw(qm_signed, qe);
 	}
 #endif
 	[[nodiscard]] constexpr SF_HOT SF_INLINE SF_FLATTEN
@@ -853,19 +805,19 @@ public:
 	// ------------------------------------------------------------------
 	// reciprocal — 1/x via sf_recip, O(1)
 	// ------------------------------------------------------------------
-	[[nodiscard]] constexpr SF_HOT SoftFloat reciprocal() const noexcept {
+	[[nodiscard]] constexpr SF_HOT SoftFloat reciprocal() const noexcept
+	{
 		if (UNLIKELY(!mantissa))
 			return from_raw(mantissa >= 0 ? (1 << 29) : -(1 << 29), 127);
 
 		bool     neg = mantissa < 0;
 		uint32_t ua  = sf_abs32(mantissa);
-		uint64_t Y   = sf_recip(ua); // 2^60 / ua
+		uint32_t Y   = sf_recip32(ua);
 
-		uint32_t qm  = static_cast<uint32_t>(Y >> 1); // [2^29, 2^30]
-		int32_t  qe  = -59 - exponent;
+		uint32_t qm = Y >> 1; // [2^29, 2^30]
+		int32_t  qe = -59 - exponent;
 
 		if (UNLIKELY(qm & 0x40000000u)) {
-			// exactly 2^30 → shift once
 			qm >>= 1;
 			qe += 1;
 		}
@@ -1162,9 +1114,6 @@ private:
 			    "asrcs  %[rm], %[rm], #1                    \n\t"
 			    "addcs  %[re], %[re], #1                    \n\t"
 
-			    // Optional: saturate exponent (1 cycle, uncomment if you need safety)
-			    // "ssat   %[re], #8, %[re]                    \n\t"
-
 			    : [rm]  "=&r" (rm),
 				[lo]  "=&r" (lo_r),
 				[hi]  "=&r" (hi_r),
@@ -1178,7 +1127,7 @@ private:
 		}
 #endif
 
-		    // ── Portable / consteval path ─────────────────────────────────────────
+		// ── Portable / consteval path ─────────────────────────────────────────
 		{
 			int64_t  prod  = static_cast<int64_t>(a.mantissa)
 			               * static_cast<int64_t>(b.mantissa);
