@@ -76,43 +76,12 @@ template<typename To, typename From>
 	if (SF_IS_CONSTEVAL()) {
 		return __builtin_clz(x);
 	}
-#if defined(__arm__)
-	uint32_t r;
-	__asm__("clz %0, %1" : "=r"(r) : "r"(x));
-	return static_cast<int>(r);
-#else
 	return __builtin_clz(x);
-#endif
-}
-
-[[nodiscard]] constexpr int sf_clz64(uint64_t x) noexcept
-{
-	if (SF_IS_CONSTEVAL()) {
-		if (x == 0) return 64;
-		int n = 0;
-		while ((x & 0x8000000000000000ULL) == 0) {
-			x <<= 1;
-			++n;
-		}
-		return n;
-	}
-	return __builtin_clzll(x);
 }
 
 // sf_abs32 — branchless absolute value for int32_t, constexpr-safe.
 [[nodiscard]] constexpr SF_CONST SF_INLINE uint32_t sf_abs32(int32_t m) noexcept
 {
-#if defined(__arm__)
-	if (!SF_IS_CONSTEVAL()) {
-		uint32_t rd;
-		__asm__(
-			"eor %0, %1, %1, asr #31\n\t"
-			"sub %0, %0, %1, asr #31\n\t"
-			: "=&r"(rd) : "r"(m)
-		);
-		return rd;
-	}
-#endif
 	uint32_t mask = static_cast<uint32_t>(m >> 31);
 	return (static_cast<uint32_t>(m) ^ mask) - mask;
 }
@@ -682,6 +651,7 @@ public:
 		return SoftFloat(a) - b;
 	}
 
+#if 0
 	// ------------------------------------------------------------------
 	// Divide — constexpr
 	//
@@ -690,6 +660,33 @@ public:
 	// ua, ub in [2^29, 2^30)  =>  ua/ub in [0.5, 2.0)
 	// q64 >> 30 gives result in [2^28, 2^30).
 	// ------------------------------------------------------------------
+	
+	[[nodiscard]] constexpr SF_HOT SoftFloat operator/(SoftFloat rhs) const noexcept {
+		if (UNLIKELY(!rhs.mantissa))
+			return from_raw(mantissa >= 0 ? (1 << 29) : -(1 << 29), 127);
+		if (UNLIKELY(!mantissa)) return zero();
+
+		bool     neg = (mantissa ^ rhs.mantissa) < 0;
+		uint32_t ua  = sf_abs32(mantissa);
+		uint32_t ub  = sf_abs32(rhs.mantissa);
+
+		/* ---- new reciprocal path (replaces UDIV) ---- */
+		uint64_t Y   = sf_recip(ub); // ~8-10 cycles, fixed latency
+		uint64_t q64 = static_cast<uint64_t>(ua) * Y;
+		uint32_t qm  = static_cast<uint32_t>(q64 >> 30);
+		int32_t  qe  = exponent - rhs.exponent - 30;
+
+		uint32_t hi = qm >> 30;
+		uint32_t lo = (~qm >> 29) & 1u & ~hi;
+		qm = (qm >> hi) << lo;
+		qe += static_cast<int32_t>(hi) - static_cast<int32_t>(lo);
+
+		int32_t qm_signed = neg ? -static_cast<int32_t>(qm) : static_cast<int32_t>(qm);
+		qe = sf_sat_exp(qe);
+		return from_raw(qm_signed, qe);
+	}
+	
+#else
 	[[nodiscard]] constexpr SF_HOT SoftFloat operator/(SoftFloat rhs) const noexcept {
 		if (UNLIKELY(!rhs.mantissa))
 			return from_raw(mantissa >= 0 ? (1 << 29) : -(1 << 29), 127);
@@ -816,6 +813,7 @@ public:
 		}
 #endif
 	}
+#endif
 	[[nodiscard]] constexpr SF_HOT SF_INLINE SF_FLATTEN
 		SoftFloat operator/(float rhs) const noexcept {
 		return *this / SoftFloat(rhs);
@@ -1052,68 +1050,8 @@ private:
 	friend struct sf_mul_expr;
 
 	// ============================================================
-// FIXED-POINT CORE HELPERS
-// ============================================================
-
-// Convert a SoftFloat to a Q29 fixed-point value, clamping to
-// avoid overflow.  The caller supplies the expected exponent
-// offset so that  x ≈ returned_value * 2^(ret_exp).
-// We return a raw int32_t in Q29 representation relative to
-// the caller's chosen base exponent.
-	[[nodiscard]] constexpr SF_INLINE int32_t
-	sf_to_q29(SoftFloat x, int32_t base_exp) noexcept
-	{
-		if (x.mantissa == 0) return 0;
-		int32_t shift = x.exponent - base_exp; // how many bits to shift
-		if (shift >= 0) {
-			if (shift >= 31) return (x.mantissa > 0) ? INT32_MAX : INT32_MIN;
-			return x.mantissa << shift;
-		}
-		else {
-			int32_t rs = -shift;
-			if (rs >= 31) return 0;
-			return x.mantissa >> rs;
-		}
-	}
-
-	// 32x32 -> high 32 of 64-bit product, with a final right-shift
-	// This maps to a single SMULL on M3
-	[[nodiscard]] constexpr SF_INLINE int32_t
-	smull_hi(int32_t a, int32_t b) noexcept
-	{
-#if defined(__arm__) && !defined(__clang__)
-		if (!SF_IS_CONSTEVAL()) {
-			int32_t hi, lo;
-			__asm__("smull %0, %1, %2, %3"
-			         : "=&r"(lo),
-				"=&r"(hi) : "r"(a),
-				"r"(b));
-			return hi;
-		}
-#endif
-		return static_cast<int32_t>(
-		    (static_cast<int64_t>(a) * static_cast<int64_t>(b)) >> 32
-		);
-	}
-
-	// 32x32 -> 64, return middle 32 bits (>> 29)
-	[[nodiscard]] constexpr SF_INLINE int32_t
-	smull_q29(int32_t a, int32_t b) noexcept
-	{
-#if defined(__arm__)
-		if (!SF_IS_CONSTEVAL()) {
-			int32_t hi, lo;
-			__asm__("smull %0, %1, %2, %3"
-			         : "=&r"(lo),
-				"=&r"(hi) : "r"(a),
-				"r"(b));
-			return (hi << 3) | (static_cast<uint32_t>(lo) >> 29);
-		}
-#endif
-		return static_cast<int32_t>(
-		    (static_cast<int64_t>(a) * static_cast<int64_t>(b)) >> 29
-		);
-	}
+	// FIXED-POINT CORE HELPERS
+	// ============================================================
 	
 	[[nodiscard]] static constexpr SF_INLINE SoftFloat sf_finish_addsub(int32_t rm, int32_t re) noexcept {
 		if (UNLIKELY(rm == 0)) return zero();
@@ -1382,17 +1320,6 @@ constexpr SoftFloat& SoftFloat::operator*=(SoftFloat r) noexcept {
 
 	int32_t am = a.mantissa;
 
-#if 0
-	if (d == 0) {
-		int32_t  s = am + pm;
-		if (UNLIKELY(s == 0)) return SoftFloat::zero();
-		uint32_t ov = static_cast<uint32_t>(s ^ (s >> 31)) >> 30;
-		s >>= static_cast<int>(ov);
-		pe += static_cast<int32_t>(ov);
-		sf_normalise_fast(s, pe);
-		return SoftFloat::from_raw(s, pe);
-	}
-#else
 	if (d == 0) {
 		int32_t s = am + pm;
 		if (UNLIKELY(s == 0)) return SoftFloat::zero();
@@ -1415,7 +1342,6 @@ constexpr SoftFloat& SoftFloat::operator*=(SoftFloat r) noexcept {
 		sf_normalise_fast(s, pe);
 		return SoftFloat::from_raw(s, pe);
 	}
-#endif
 
 	int32_t exp;
 	if (d > 0) {
@@ -2496,25 +2422,10 @@ constexpr SF_HOT SoftFloat SoftFloat::exp() const noexcept
 {
 	if (UNLIKELY(mantissa == 0)) return one();
 
-	// ----------------------------------------------------------------
-	// Constants
-	// ----------------------------------------------------------------
-	static constexpr int32_t LN2_M = 0x2C5C85FE; // ln(2) mantissa (Q30 normalized)
-	static constexpr int32_t LN2_E = -30;         // ln(2) exponent
-	static constexpr int32_t INV_LN2_M = 0x2E2B8A3E; // 1/ln(2) mantissa (Q29 normalized)
-	static constexpr int32_t INV_LN2_E = -29;         // 1/ln(2) exponent
+	static constexpr int32_t INV_LN2_M = 0x2E2A8ECB; // 1/ln(2) in Q29  (= round(1/ln2 · 2²⁹))
 
-	// ----------------------------------------------------------------
-	// Step 1: k = trunc(x * (1/ln2))
-	//
-	// Use SoftFloat-style smull to get the product mantissa, then
-	// shift by the combined exponent to get an integer.
-	//
-	// prod = mantissa * INV_LN2_M  (int64_t)
-	// prod_mantissa ≈ prod >> 29   (Q29 * Q29 → Q58, keep top 29 bits)
-	// prod_exponent = exponent + INV_LN2_E + 29
-	// k = prod_mantissa >> (-prod_exponent)  if prod_exponent < 0
-	// ----------------------------------------------------------------
+	// ── Step 1: one SMULL — the only multiply we need ────────────────────────
+	// kprod × 2^(exponent − 29)  =  x / ln2   (exact in 64-bit fixed-point)
 	int64_t kprod;
 #if defined(__arm__)
 	if (!SF_IS_CONSTEVAL()) {
@@ -2530,175 +2441,80 @@ constexpr SF_HOT SoftFloat SoftFloat::exp() const noexcept
 		kprod = static_cast<int64_t>(mantissa) * static_cast<int64_t>(INV_LN2_M);
 	}
 
-	// kprod represents: mantissa * INV_LN2_M
-	// Real value = kprod * 2^(exponent + INV_LN2_E)
-	//            = kprod * 2^(exponent - 29)
-	// To extract integer k: shift right by (29 - exponent)
+	// The binary radix point sits at bit position k_rshift inside kprod.
 	const int32_t k_rshift = 29 - exponent;
-	int32_t k;
-	if (k_rshift >= 62) {
-		k = 0;
-	}
-	else if (k_rshift > 0) {
-		// Truncate toward zero (same as original to_int32)
-		k = static_cast<int32_t>(kprod >> k_rshift);
-	}
-	else if (k_rshift == 0) {
-		k = static_cast<int32_t>(kprod);
-	}
-	else {
-		// Large |x|: overflow
-		return (mantissa > 0) ? from_raw(0x20000000, 127) : zero();
-	}
+	if (UNLIKELY(k_rshift <= 0))
+		return mantissa > 0 ? from_raw(0x20000000, 127) : zero();
 
-	// ----------------------------------------------------------------
-	// Step 2: f = x - k * ln(2) using SoftFloat arithmetic
+	// ── Steps 2+3 fused: extract k and fractional index in one pass ──────────
 	//
-	// This is only 1 multiply + 1 subtract — both are cheap.
-	// k is small (typically |k| < 200), so SoftFloat(k) is trivial.
-	// The key speed wins are in step 3-5 (table lookup, no normalization).
-	// ----------------------------------------------------------------
-	// Compute k*ln2 as SoftFloat: k_sf * ln2_sf
-	// Then f = x - k*ln2
-	SoftFloat f;
-	{
-		SoftFloat k_ln2 = SoftFloat(k) * from_raw(LN2_M, LN2_E);
-		f = from_raw(mantissa, exponent) - k_ln2;
-	}
-
-	// Correct f into [0, ln2)
-	{
-		const SoftFloat sf_ln2 = from_raw(LN2_M, LN2_E);
-		if (f.mantissa < 0) {
-			f = f + sf_ln2;
-			k -= 1;
-		}
-		else if (!(f < sf_ln2)) {
-			f = f - sf_ln2;
-			k += 1;
-		}
-	}
-
-	// ----------------------------------------------------------------
-	// Step 3: Convert f to table index
+	// Two's-complement floor division property:
+	//   kprod  =  k × 2^k_rshift  +  frac_bits,   frac_bits ∈ [0, 2^k_rshift)
 	//
-	// We need (f / ln2) * 256 as 8.21 fixed point.
-	// f is a SoftFloat in [0, ln2). Multiply by 1/ln2:
-	//   prod = f.mantissa * INV_LN2_M  (int64_t, ~58 bits)
-	//   real value = prod * 2^(f.exponent + INV_LN2_E)
-	//              = prod * 2^(f.exponent - 29)
+	// Arithmetic right shift gives k = ⌊x/ln2⌋ (works for both signs).
+	// The bottom k_rshift bits of kprod (unsigned) ARE frac_bits — no SoftFloat
+	// subtraction, no second multiply needed.
 	//
-	// We want the result as a 29-bit unsigned integer (Q0.29 of [0,1)):
-	//   u_q29 = prod >> (29 - f.exponent)   [shift away the fractional exponent]
-	// Then split into 8-bit index + 21-bit frac.
-	// ----------------------------------------------------------------
-	if (UNLIKELY(f.mantissa == 0)) {
-		int32_t final_exp = k - 29;
-		if (UNLIKELY(final_exp > 127))  return from_raw(0x20000000, 127);
-		if (UNLIKELY(final_exp < -128)) return zero();
-		return from_raw(0x20000000, final_exp);
-	}
-
+	// Shifting frac_bits right by (k_rshift − 29) normalises to Q29 → u_8_21.
+	int32_t  k;
 	uint32_t u_8_21;
-	{
-		int64_t fprod;
-#if defined(__arm__)
-		if (!SF_IS_CONSTEVAL()) {
-			int32_t lo, hi;
-			__asm__("smull %0, %1, %2, %3"
-				: "=&r"(lo), "=&r"(hi)
-				: "r"(f.mantissa), "r"(INV_LN2_M));
-			fprod = (static_cast<int64_t>(hi) << 32) | static_cast<uint32_t>(lo);
-		}
-		else
-#endif
-		{
-			fprod = static_cast<int64_t>(f.mantissa) * static_cast<int64_t>(INV_LN2_M);
-		}
 
-		// fprod real value = fprod * 2^(f.exponent - 29)
-		// We want u_q29 = (f/ln2) * 2^29 = fprod * 2^(f.exponent - 29) * 2^29
-		//               = fprod * 2^(f.exponent)
-		// But fprod is ~58 bits wide. f.exponent is negative (f < ln2 < 1),
-		// typically around -30. So shift right by |f.exponent|.
-		const int32_t fshift = -f.exponent;
-		if (LIKELY(fshift > 0 && fshift < 62)) {
-			u_8_21 = static_cast<uint32_t>(static_cast<uint64_t>(fprod) >> fshift);
-		}
-		else if (fshift <= 0) {
-			u_8_21 = static_cast<uint32_t>(fprod << (-fshift));
-		}
-		else {
-			u_8_21 = 0;
-		}
-	}
+	if (LIKELY(k_rshift <= 63)) {
+		k = static_cast<int32_t>(kprod >> k_rshift);   // ⌊x/ln2⌋, any sign
 
-	const uint32_t idx_raw = u_8_21 >> 21;
-	const uint32_t idx = idx_raw > 255u ? 255u : idx_raw;
-	const int32_t  frac = (idx_raw > 255u) ? 0 : static_cast<int32_t>(u_8_21 & 0x001FFFFFu);
+		const uint64_t mask = (uint64_t(1) << k_rshift) - 1u;
+		const uint64_t frac_bits = static_cast<uint64_t>(kprod) & mask; // ∈ [0, 2^k_rshift)
 
-	// ----------------------------------------------------------------
-	// Step 4: Table interpolation (pure integer, Q29)
-	// ----------------------------------------------------------------
-	int32_t result_q29;
-	int32_t result_exp = -29;
-
-	if (LIKELY(idx < 255)) {
-		const int32_t m0 = EXP_MANT[idx];
-		const int32_t m1 = EXP_MANT[idx + 1];
-		const int32_t delta = m1 - m0;
-#if defined(__arm__)
-		if (!SF_IS_CONSTEVAL()) {
-			int32_t lo, hi;
-			__asm__("smull %0, %1, %2, %3"
-				: "=&r"(lo), "=&r"(hi)
-				: "r"(delta), "r"(frac));
-			result_q29 = m0 + ((hi << 11) | (static_cast<uint32_t>(lo) >> 21));
-		}
-		else
-#endif
-		{
-			result_q29 = m0 + static_cast<int32_t>(
-				(static_cast<int64_t>(delta) * static_cast<int64_t>(frac)) >> 21);
-		}
+		u_8_21 = (k_rshift > 29)
+			? static_cast<uint32_t>(frac_bits >> (k_rshift - 29))
+			: static_cast<uint32_t>(frac_bits) << (29 - k_rshift);
 	}
 	else {
-		// idx == 255: interpolate toward 2.0 in Q29 (=0x40000000)
-		// Work in Q30 to avoid overflow at the boundary
-		const int32_t m0_q30 = EXP_MANT[255] >> 1;
-		constexpr int32_t m1_q30 = 0x20000000; // 2^30 * 0.5 = 2.0 in Q30 - wait, 1.0 in Q30
-		// Actually: EXP_MANT[256] = 0x20000000 which is 1.0 in Q29,
-		// but we want 2.0 in Q29 = 0x40000000. The table wraps:
-		// 2^(256/256) = 2.0, stored as 0x20000000 (= 1.0 in Q29 with implicit +1 exponent).
-		// So in Q30: EXP_MANT[255]>>1 interpolates toward 0x20000000 (=1.0 Q30 = 2.0 Q29 / 2)
-		const int32_t delta = m1_q30 - m0_q30;
-		int32_t rm = m0_q30 + static_cast<int32_t>(
-			(static_cast<int64_t>(delta) * static_cast<int64_t>(frac)) >> 21);
-		if (static_cast<uint32_t>(rm) >= 0x40000000u) {
-			result_q29 = rm >> 1;
-			result_exp = -28;
-		}
-		else {
-			result_q29 = rm;
-			result_exp = -30;
-		}
+		// k_rshift ≥ 64: |x| < 2^{−35}; |kprod| < 2^60 < 2^64.
+		// k ∈ {−1, 0}; static_cast<uint64_t>(kprod) correctly encodes
+		// the fractional remainder for k_rshift = 64 (and is a close
+		// approximation for larger shifts, where exp(x) ≈ 1 anyway).
+		k = (kprod < 0) ? -1 : 0;
+		const uint32_t rsh = static_cast<uint32_t>(k_rshift - 29);
+		u_8_21 = (rsh < 60)
+			? static_cast<uint32_t>(static_cast<uint64_t>(kprod) >> rsh)
+			: 0u;
 	}
 
-	// ----------------------------------------------------------------
-	// Step 5: Apply 2^k
-	// ----------------------------------------------------------------
-	int32_t final_exp = result_exp + k;
+	// u_8_21 ∈ [0, 2²⁹) — no clamping needed.
+	const uint32_t idx = u_8_21 >> 21;                              // 0..255
+	const int32_t  frac = static_cast<int32_t>(u_8_21 & 0x1FFFFFu);  // 0..2²¹−1
 
-	// Handle mantissa overflow from interpolation
-	if (static_cast<uint32_t>(result_q29) >= 0x40000000u) {
-		result_q29 >>= 1;
-		final_exp += 1;
+	// ── Step 4: table lookup + linear interpolation ──────────────────────────
+	const int32_t m0 = EXP_MANT[idx];
+	// EXP_MANT[256] = 0x20000000 stores the mantissa of 2.0 with an implicit
+	// exponent increment (+1). For interpolation across the last interval we
+	// need the true Q29 value of 2.0 = 0x40000000.
+	const int32_t m1 = LIKELY(idx < 255) ? EXP_MANT[idx + 1] : int32_t(0x40000000);
+	const int32_t delta = m1 - m0;   // small, always positive
+
+	int32_t result_q29;
+#if defined(__arm__)
+	if (!SF_IS_CONSTEVAL()) {
+		int32_t lo, hi;
+		__asm__("smull %0, %1, %2, %3"
+			: "=&r"(lo), "=&r"(hi)
+			: "r"(delta), "r"(frac));
+		result_q29 = m0 + ((hi << 11) | (static_cast<uint32_t>(lo) >> 21));
+	}
+	else
+#endif
+	{
+		result_q29 = m0 + static_cast<int32_t>((static_cast<int64_t>(delta) * frac) >> 21);
 	}
 
+	// result_q29 ∈ [2²⁹, 2³⁰) — already normalised; no adjustment needed.
+	// (At idx=255, frac < 2²¹ guarantees result < 0x40000000.)
+
+	// ── Step 5: attach exponent ───────────────────────────────────────────────
+	const int32_t final_exp = k - 29;
 	if (UNLIKELY(final_exp > 127))  return from_raw(0x20000000, 127);
 	if (UNLIKELY(final_exp < -128)) return zero();
-
-	// result_q29 is in [0x20000000, 0x3FFFFFFF] — already normalized
 	return from_raw(result_q29, final_exp);
 }
 
@@ -3010,23 +2826,6 @@ constexpr SoftFloat SoftFloat::log10() const noexcept {
 constexpr SoftFloat SoftFloat::pow(SoftFloat y) const noexcept {
 	if (mantissa == 0) return y.mantissa == 0 ? one() : zero();
 	if (y.mantissa == 0) return one();
-
-	// Fast path: integer exponent
-	if (y.exponent >= 0) { // exponent >= 0 means no fractional bits possible
-		int32_t n = y.to_int32();
-		if (n >= 0) {
-			SoftFloat result = one(), base = *this;
-			for (uint32_t un = static_cast<uint32_t>(n); un; un >>= 1) {
-				if (un & 1) result *= base;
-				base *= base;
-			}
-			return result;
-		}
-		// negative integer: base^(-n) = 1 / base^n
-		return one() / pow(-y);
-	}
-
-	if (is_negative()) return zero(); // non-integer power of negative
 	return (y * log()).exp();
 }
 

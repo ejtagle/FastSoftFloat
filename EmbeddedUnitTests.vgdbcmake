@@ -72,6 +72,7 @@
             <Files />
           </RootVirtualSourceFolder>
           <HeaderDiscoveryMode>Default</HeaderDiscoveryMode>
+          <ResourceDirectories />
         </CMakeTargetSpecificSettings>
       </TargetSpecificSettings>
       <SetLDLibraryPathFromDependentArtifacts>true</SetLDLibraryPathFromDependentArtifacts>
