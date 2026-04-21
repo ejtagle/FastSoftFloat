@@ -1368,58 +1368,50 @@ constexpr SoftFloat& SoftFloat::operator*=(SoftFloat r) noexcept {
 // =========================================================================
 // fused_mul_sub — same structure as fused_mul_add with negated product
 // =========================================================================
-[[nodiscard]] constexpr SF_HOT SoftFloat fused_mul_sub(SoftFloat a, SoftFloat b, SoftFloat c) noexcept {
+[[nodiscard]] constexpr SF_HOT SoftFloat fused_mul_sub(SoftFloat a, SoftFloat b, SoftFloat c) noexcept
+{
 	if (UNLIKELY(!b.mantissa || !c.mantissa)) return a;
-	if (UNLIKELY(!a.mantissa)) return -(b * c);
+	if (UNLIKELY(!a.mantissa)) return -SoftFloat::mul_plain(b, c);
 
-	// Step 1: compute product mantissa in normalised form (positive).
 	int64_t  prod = static_cast<int64_t>(b.mantissa) * static_cast<int64_t>(c.mantissa);
-	int32_t  pm = static_cast<int32_t>(prod >> 29);
-	int32_t  pe = b.exponent + c.exponent + 29;
+	int32_t  pm   = static_cast<int32_t>(prod >> 29);
+	int32_t  pe   = b.exponent + c.exponent + 29;
 
-	// Normalise magnitude (same as fused_mul_add).
-	uint32_t norm = static_cast<uint32_t>(pm ^ (pm >> 31)) >> 30;  // R3-3
+	// Branchless 1-bit normalisation of the product mantissa
+	uint32_t norm = static_cast<uint32_t>(pm ^ (pm >> 31)) >> 30;
 	pm >>= norm;
 	pe += static_cast<int32_t>(norm);
 
-	// Step 2: negate AFTER normalisation so the sign flip is exact.
+	// Negate the product: we are computing a - (b*c)
 	pm = -pm;
 
-	// Step 3: align and add (identical to fused_mul_add from here).
 	int d = a.exponent - pe;
 	if (d >= 31) return a;
-	if (d <= -31) return SoftFloat::from_raw(pm, pe);
+
+	if (d <= -31) {
+		// Product dominates, but pe may itself be out of [-128,127]
+		if (UNLIKELY(pe > 127))  return SoftFloat::from_raw(pm >= 0 ? (1 << 29) : -(1 << 29), 127);
+		if (UNLIKELY(pe < -128)) return SoftFloat::zero();
+		return SoftFloat::from_raw(pm, pe);
+	}
 
 	int32_t am = a.mantissa;
 
 	if (d == 0) {
-		int32_t  s = am + pm;
-		if (UNLIKELY(s == 0)) return SoftFloat::zero();
-		uint32_t ov = static_cast<uint32_t>(s ^ (s >> 31)) >> 30;
-		s >>= static_cast<int>(ov);
-		pe += static_cast<int32_t>(ov);
-		sf_normalise_fast(s, pe);
-		return SoftFloat::from_raw(s, pe);
+		// pe == a.exponent, therefore already in [-128,127]
+		return SoftFloat::sf_finish_addsub(am + pm, pe);
 	}
 
-	int32_t exp;
 	if (d > 0) {
+		// a.exponent is in range by invariant
 		pm >>= d;
-		exp = a.exponent;
-		int32_t s = am + pm;
-		if (UNLIKELY(s == 0)) return SoftFloat::zero();
-		sf_normalise_fast(s, exp);
-		return SoftFloat::from_raw(s, exp);
+		return SoftFloat::sf_finish_addsub(am + pm, a.exponent);
 	}
-	else {
-		am >>= -d;
-		exp = pe;
-		int32_t s = am + pm;
-		if (UNLIKELY(s == 0)) return SoftFloat::zero();
-		exp = sf_sat_exp(exp);
-		sf_normalise_fast(s, exp);
-		return SoftFloat::from_raw(s, exp);
-	}
+
+	// d < 0 : pe may be out of range; saturate once, then let sf_finish_addsub
+	// handle the zero / normalised / overflow / cancellation fast paths.
+	am >>= -d;
+	return SoftFloat::sf_finish_addsub(am + pm, sf_sat_exp(pe));
 }
 
 // =========================================================================
