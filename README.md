@@ -13,66 +13,61 @@ No NaN, +/-Inf are handled and/or created</br>
 
 # Expected approximate cycle counts
 
-| Function / Operator                     | Min | Typ | Max | Remarks |
-|-----------------------------------------|-----|-----|-----|---------|
-| **Construction / Assignment**           |     |     |     |         |
-| `SoftFloat()` (default)                 | 1   | 1   | 1   | Trivial inline |
-| `SoftFloat(int32_t)`                    | 8   | 10  | 25  | Normalisation: CLZ (1) + shift + SSAT (1). Worst‑case many left shifts. |
-| `SoftFloat(float)`                      | 12  | 15  | 20  | Bit‑cast + IEEE unpack + normalisation. |
-| `operator=(int32_t / float)`            | 8   | 10  | 25  | Same as constructor from same type. |
-| **Conversions**                         |     |     |     |         |
-| `to_float()`                            | 5   | 6   | 8   | Few integer ops + bit‑cast. No normalisation. |
-| `to_int32()`                            | 5   | 7   | 12  | Shift + sign handling. |
-| **Unary**                               |     |     |     |         |
-| `operator-()`                           | 1   | 1   | 1   | Flip sign bit. |
-| `abs()`                                 | 2   | 2   | 2   | Branchless absolute value. |
-| **Addition / Subtraction**              |     |     |     |         |
-| `operator+` (same exponent)             | 8   | 10  | 15  | Add + overflow check (EOR/TST/ASR). |
-| `operator+` (different exponent)        | 10  | 12  | 20  | Alignment shift + add + normalisation. |
-| `operator-` (same exponent)             | 8   | 12  | 20  | Subtract + cancellation normalisation (CLZ). |
-| `operator-` (different exponent)        | 10  | 14  | 22  | Alignment + subtract + normalisation. |
-| **Multiplication**                      |     |     |     |         |
-| `operator*` (deferred via `sf_mul_expr`)| 0   | 0   | 0   | No evaluation; only creates proxy. |
-| `SoftFloat::mul_plain` (materialised)   | 9   | 11  | 14  | SMULL (3‑5) + ORR/MOV + overflow fix‑up. |
-| **Division**                            |     |     |     |         |
-| `operator/` (runtime, Knuth D)          | 20  | 28  | 45  | Two UDIV (2‑12 each) + corrections. |
-| `operator/` (fallback 64‑bit)           | 60  | 70  | 90  | `__aeabi_uldivmod` call. |
-| **Shifts**                              |     |     |     |         |
-| `operator<<` / `operator>>`             | 2   | 3   | 5   | Exponent adjust + saturation check. |
-| **Comparisons**                         |     |     |     |         |
-| `operator==` / `!=`                     | 2   | 2   | 2   | Compare mantissa & exponent. |
-| `operator<` / `>` / `<=` / `>=`         | 6   | 8   | 10  | Sign + exponent + mantissa branching. |
-| **Math Functions**                      |     |     |     |         |
-| `sin()` / `cos()`                       | 45  | 55  | 80  | Range reduction + table lookup (256 entries) + interpolation. |
-| `tan()`                                 | 50  | 60  | 90  | `sincos` + division. |
-| `asin()` / `acos()`                     | 55  | 70  | 100 | `atan2` + `sqrt` (one extra division). |
-| `atan2(y, x)`                           | 55  | 75  | 120 | Table + interpolation + octant logic; UDIV in range reduction. |
-| `exp()`                                 | 35  | 45  | 65  | Range reduction (multiply + to_int32) + table interpolation. |
-| `log()`                                 | 40  | 50  | 70  | `log2` + one multiply. |
-| `log2()`                                | 35  | 45  | 60  | Table lookup (257 entries) + interpolation. |
-| `log10()`                               | 40  | 50  | 70  | `log2` + multiply. |
-| `pow(y)`                                | 70  | 100 | 150 | `exp(y*log(x))`; may use integer exponent fast path. |
-| `sqrt()`                                | 20  | 28  | 40  | `inv_sqrt` + multiply. |
-| `inv_sqrt()`                            | 18  | 25  | 35  | Table seed + two Newton iterations (each ~9‑11 cycles for mul+sub). |
-| `hypot(x, y)`                           | 25  | 35  | 50  | Scaling + multiply + add + `sqrt`. |
-| `sinh()` / `cosh()` / `tanh()`          | 50  | 65  | 90  | `exp` + division/shift. |
-| **Rounding / Truncation**               |     |     |     |         |
-| `trunc()`                               | 8   | 10  | 15  | Convert to int32 + construct back. |
-| `floor()` / `ceil()`                    | 10  | 14  | 20  | Integer shift + sign logic. |
-| `round()`                               | 8   | 12  | 18  | Add bias + shift. |
-| `fract()`                               | 12  | 16  | 22  | `trunc` + subtract. |
-| `modf()`                                | 14  | 18  | 25  | `trunc` + subtract, returns pair. |
-| **Fused Operations**                    |     |     |     |         |
-| `fused_mul_add(a, b, c)`                | 15  | 20  | 30  | Multiply (SMULL) + align + add + normalise. |
-| `fused_mul_sub(a, b, c)`                | 15  | 20  | 30  | Same as add, product negated. |
-| `fused_mul_mul_add(a,b,c,d)`            | 20  | 28  | 40  | Two multiplies + align + add + normalise. |
-| `fused_mul_mul_sub(a,b,c,d)`            | 20  | 28  | 40  | Same as add, second product negated. |
-| **Utilities**                           |     |     |     |         |
-| `clamp(lo, hi)`                         | 12  | 16  | 20  | Two comparisons. |
-| `copysign(sign)`                        | 2   | 2   | 2   | Conditional sign flip. |
-| `fmod(y)`                               | 30  | 40  | 60  | Division + trunc + multiply + subtract. |
-| `fma(b, c)`                             | 15  | 20  | 30  | Same as `fused_mul_add`. |
-| `lerp(a, b, t)`                         | 20  | 28  | 40  | Subtract + multiply + add. |
+# SoftFloat Cycle Count Analysis (GD32F103 / Cortex‑M3)
+
+## 1. SoftFloat Cycle Counts (min / typical / max)
+
+| Function                           | Min | Typ | Max | Remarks                                                                 |
+|------------------------------------|-----|-----|-----|-------------------------------------------------------------------------|
+| Construction / assignment          |   5 |  10 |  30 | Normalisation dominates.                                                 |
+| `operator+`, `operator-`           |   8 |  15 |  45 | Fast path: same sign addition; slow path: cancellation with CLZ.        |
+| `operator*` (`mul_plain`)          |   6 |  12 |  20 | Single SMULL + shift + SSAT.                                             |
+| `operator/`                        |  10 |  18 |  30 | Table‑based reciprocal + one multiply; no hardware division.             |
+| `sqrt()`                           |  20 |  35 |  60 | Goldschmidt method: table lookup + 2‑3 multiplies + final multiply.     |
+| `inv_sqrt()`                       |  15 |  25 |  40 | Table + one Newton iteration (2 multiplies).                             |
+| `exp()`                            |  25 |  40 |  80 | SMULL for range reduction, table lookup, linear interpolation.           |
+| `log2()`                           |  15 |  25 |  40 | Table lookup + interpolation; very fast.                                 |
+| `log()` / `log10()`                |  20 |  30 |  50 | One extra multiply after `log2()`.                                       |
+| `sincos()`                         |  30 |  60 | 150 | Table interpolation; range reduction may use UDIV or loop.               |
+| `sin()` / `cos()`                  |  25 |  55 | 140 | Wrappers around `sincos()`.                                              |
+| `tan()`                            |  40 |  80 | 200 | `sincos()` + reciprocal + multiply.                                      |
+| `asin()` / `acos()`                |  50 | 100 | 200 | Uses `atan2()` + `sqrt()`; moderate cost.                                |
+| `atan2()`                          |  40 |  90 | 180 | Table + series; UDIV used in some paths.                                 |
+| `sinh()` / `cosh()` / `tanh()`     |  35 |  55 | 100 | Based on `exp()`.                                                        |
+| `pow()` (integer exponent)         |   5 |  20 | 100 | Fast exponentiation by squaring; loop count up to 31.                    |
+| `pow()` (general)                  |  80 | 150 | 400 | Calls `exp(y*log(x))`.                                                   |
+| `trunc()` / `floor()` / `ceil()` / `round()` |   8 |  15 |  30 | Simple bit manipulations.                                                |
+| `fmod()`                           |  15 |  40 | 200 | Iterative remainder with UDIV; loops proportional to exponent difference.|
+| `fma()` / `fused_mul_add`          |  10 |  20 |  40 | 64‑bit product + addition.                                               |
+| `hypot()`                          |  15 |  35 |  70 | One square root.                                                         |
+| `lerp()`                           |  15 |  25 |  40 | One multiply + two adds.                                                 |
+
+## 2. Comparison with Typical Soft‑Float Library and qfplib
+
+| Function         | SoftFloat Typical | Soft‑float Lib Typical | qfplib Typical | Comments |
+|------------------|-------------------|------------------------|----------------|----------|
+| `fadd` / `fsub`  | 15                | 80–120                 | 35–50          | qfplib uses alignment shifts and careful rounding. |
+| `fmul`           | 12                | 60–90                  | 20–30          | qfplib single SMULL + normalization. |
+| `fdiv`           | 18                | 150–250                | 40–70          | qfplib uses UDIV for quotient estimate + correction. |
+| `fsqrt`          | 35                | 300–500                | 50–80          | qfplib table + two Newton iterations with SDIV. |
+| `fexp`           | 40                | 500–800                | 80–150         | qfplib uses table + power series. |
+| `fln` / `flog`   | 30                | 400–700                | 60–100         | qfplib uses table + series. |
+| `fsin` / `fcos`  | 55                | 400–700                | 100–200        | qfplib performs range reduction and table interpolation. |
+| `ftan`           | 80                | 600–1000               | 150–250        | qfplib uses fraction decomposition. |
+| `fatan2`         | 90                | 600–1000               | 100–200        | qfplib uses table + refinement. |
+
+## Notes
+
+- **Cortex‑M3 instruction timings** used for analysis:
+  - Data processing: 1 cycle
+  - Load/store: 2–3 cycles
+  - Branches: 1–3 cycles (taken penalty)
+  - Multiply (SMULL/UMULL): 1 cycle
+  - Divide (UDIV/SDIV): 2–12 cycles (early‑out)
+  - CLZ, SSAT/USAT: 1 cycle
+- **SoftFloat** timings assume `__arm__` runtime path with branch hints.
+- **qfplib** timings derived by static analysis of provided assembly.
+- “Typical” values represent common‑case paths (normalized operands, moderate exponent differences).
 
 ### Performance
-At this point, the library is exactly 8 times slower than hardware float support.
+At this point, the library is nearly 8 times slower than hardware float support.
