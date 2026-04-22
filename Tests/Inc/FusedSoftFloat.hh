@@ -1654,6 +1654,208 @@ static constexpr int32_t SF_SIN_Q30[257] = {
 			   0,
 };
 
+#if 1
+constexpr SF_HOT SoftFloatPair SoftFloat::sincos() const noexcept
+{
+	if (UNLIKELY(mantissa == 0))
+		return { zero(), one() };
+
+	/* -------------------------------------------------------------
+	 * 1) Fast range reduction.
+	 *
+	 * After this block:  e ≤ −27  and  |m| < 843314857  (i.e. < 2π)
+	 * ------------------------------------------------------------- */
+	int32_t m = mantissa;
+	int32_t e = exponent;
+
+	if (e == -27) {
+		// same exponent as 2π → compare mantissas
+		const int32_t tpm = 843314857; // 2π mantissa
+		if (m >= tpm) {
+			m -= tpm;
+		}
+		else if (m < 0) {
+			m += tpm;
+			if (m < 0) m += tpm; // one more step covers the whole [-2^30,0) range
+		}
+	}
+	else if (e == -26) {
+		// |x| ∈ [4,8)  → at most two periods
+		const uint32_t tpm = 843314857;
+		uint32_t am = sf_abs32(m);
+		uint32_t M  = am << 1; // rescale to exponent −27
+		uint32_t k, rem;
+#if defined(__arm__)
+		if (!SF_IS_CONSTEVAL()) {
+			__asm__("udiv %0, %1, %2" : "=r"(k) : "r"(M), "r"(tpm));
+		}
+		else
+#endif
+			k = M / tpm;
+
+		rem = M - k * tpm;
+		if (m < 0 && rem != 0)           // negative argument → mirror into [0,2π)
+			m = static_cast<int32_t>(tpm - rem);
+		else
+			m = static_cast<int32_t>(rem);
+		e = -27;
+	}
+	else if (e == -25) {
+		// |x| ∈ [8,16)
+		const uint32_t tpm = 843314857;
+		uint32_t am = sf_abs32(m);
+		uint32_t M  = am << 2;
+		uint32_t k, rem;
+#if defined(__arm__)
+		if (!SF_IS_CONSTEVAL()) {
+			__asm__("udiv %0, %1, %2" : "=r"(k) : "r"(M), "r"(tpm));
+		}
+		else
+#endif
+			k = M / tpm;
+
+		rem = M - k * tpm;
+		if (m < 0 && rem != 0)
+			m = static_cast<int32_t>(tpm - rem);
+		else
+			m = static_cast<int32_t>(rem);
+		e = -27;
+	}
+	else if (e > -25) {
+		// large angle – keep the generic path
+		SoftFloat xi = SoftFloat::from_raw(mantissa, exponent);
+		constexpr int32_t INV_2PI_M = 683565276;
+		constexpr int32_t INV_2PI_E = -32;
+		constexpr int32_t TWO_PI_M  = 843314857;
+		constexpr int32_t TWO_PI_E  = -27;
+
+		int32_t ki = (xi * SoftFloat::from_raw(INV_2PI_M, INV_2PI_E)).to_int32();
+		if (ki != 0)
+			xi = xi - SoftFloat(ki) * SoftFloat::from_raw(TWO_PI_M, TWO_PI_E);
+
+		const SoftFloat two_pi = SoftFloat::from_raw(TWO_PI_M, TWO_PI_E);
+		if (xi.mantissa < 0) xi = xi + two_pi;
+		if (!(xi < two_pi))  xi = xi - two_pi;
+
+		m = xi.mantissa;
+		e = xi.exponent; // now guaranteed ≤ −27
+	}
+
+	const bool neg = m < 0;
+	const uint32_t am = sf_abs32(m);
+
+	/* -------------------------------------------------------------
+	 * 2) Phase = |x| * (256 / 2π)  in 8.24 fixed-point.
+	 *
+	 * Because e ≤ −27, the shift amount s = 1−e is always ≥ 28.
+	 * We therefore never need a 64-bit variable shift; a 32-bit
+	 * (hi,lo) extraction is enough.
+	 * ------------------------------------------------------------- */
+	constexpr int32_t K_Q25 = 1367130551; // round((128/π)·2^25)
+
+	uint32_t phase; // 8.24 value, low 32 bits
+#if defined(__arm__)
+	if (!SF_IS_CONSTEVAL()) {
+		int32_t lo, hi;
+		__asm__("umull %0, %1, %2, %3"
+		        : "=&r"(lo),
+			"=&r"(hi)
+		        : "r"(am),
+			"r"(K_Q25));
+
+		const int32_t s = 1 - e; // 28 … 129
+		if (s < 32) {
+			// 28‥31  (most common)
+			phase = (static_cast<uint32_t>(hi) << (32 - s))
+			      | (static_cast<uint32_t>(lo) >> s);
+		}
+		else if (s < 64) {
+			// 32‥63
+			phase = static_cast<uint32_t>(hi) >> (s - 32);
+		}
+		else {
+			phase = 0;
+		}
+	}
+	else
+#endif
+	{
+		uint64_t prod = static_cast<uint64_t>(am) * static_cast<uint64_t>(K_Q25);
+		int32_t s = 1 - e;
+		phase = (s < 64) ? static_cast<uint32_t>(prod >> s) : 0u;
+	}
+
+	const uint32_t idx  = (phase >> 24) & 0xFFu;
+	const uint32_t frac = phase & 0xFFFFFFu;
+
+	/* -------------------------------------------------------------
+	 * 3) Table lookup + linear interpolation
+	 * ------------------------------------------------------------- */
+	const uint32_t s_idx0 = idx;
+	const uint32_t s_idx1 = idx + 1u;
+	const uint32_t c_idx0 = (idx + 64u) & 0xFFu;
+	const uint32_t c_idx1 = c_idx0 + 1u;
+
+	const int32_t s0 = SF_SIN_Q30[s_idx0];
+	const int32_t s1 = SF_SIN_Q30[s_idx1];
+	const int32_t c0 = SF_SIN_Q30[c_idx0];
+	const int32_t c1 = SF_SIN_Q30[c_idx1];
+
+	int32_t sin_q30, cos_q30;
+#if defined(__arm__)
+	if (!SF_IS_CONSTEVAL()) {
+		int32_t ds = s1 - s0;
+		int32_t dc = c1 - c0;
+		int32_t lo_s, hi_s, lo_c, hi_c;
+
+		__asm__("smull %0, %1, %2, %3"
+		        : "=&r"(lo_s),
+			"=&r"(hi_s)
+		        : "r"(ds),
+			"r"(static_cast<int32_t>(frac)));
+		__asm__("smull %0, %1, %2, %3"
+		        : "=&r"(lo_c),
+			"=&r"(hi_c)
+		        : "r"(dc),
+			"r"(static_cast<int32_t>(frac)));
+
+		sin_q30 = s0 + ((hi_s << 8) | (static_cast<uint32_t>(lo_s) >> 24));
+		cos_q30 = c0 + ((hi_c << 8) | (static_cast<uint32_t>(lo_c) >> 24));
+	}
+	else
+#endif
+	{
+		int64_t ps = static_cast<int64_t>(s1 - s0) * static_cast<int64_t>(frac);
+		int64_t pc = static_cast<int64_t>(c1 - c0) * static_cast<int64_t>(frac);
+		sin_q30 = s0 + static_cast<int32_t>(ps >> 24);
+		cos_q30 = c0 + static_cast<int32_t>(pc >> 24);
+	}
+
+	if (neg) sin_q30 = -sin_q30; // cos is even
+
+	/* -------------------------------------------------------------
+	 * 4) Fast Q30 → SoftFloat (no generic normalise call)
+	 * ------------------------------------------------------------- */
+	auto from_q30 = [](int32_t q) -> SoftFloat {
+		if (q == 0) return SoftFloat::zero();
+		uint32_t a = sf_abs32(q);
+		if (a >= 0x40000000u) {
+			// ≥ 2^30  → one-bit right shift
+			q >>= 1;
+			return SoftFloat::from_raw(q, -29);
+		}
+		if (a >= 0x20000000u)          // already in [2^29,2^30)
+			return SoftFloat::from_raw(q, -30);
+		// need left shift (small angles near zero)
+		int shift = sf_clz(a) - 2;
+		q <<= shift;
+		return SoftFloat::from_raw(q, -30 - shift);
+	};
+
+	return { from_q30(sin_q30), from_q30(cos_q30) };
+}
+
+#else
 constexpr SF_HOT SoftFloatPair SoftFloat::sincos() const noexcept
 {
 	if (UNLIKELY(mantissa == 0))
@@ -1807,6 +2009,7 @@ constexpr SF_HOT SoftFloatPair SoftFloat::sincos() const noexcept
 	};
 
 }
+#endif
 
 constexpr SoftFloat SoftFloat::tan() const noexcept {
 	auto[s, c] = sincos();
