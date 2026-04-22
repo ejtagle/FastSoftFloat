@@ -2011,11 +2011,29 @@ constexpr SF_HOT SoftFloatPair SoftFloat::sincos() const noexcept
 }
 #endif
 
-constexpr SoftFloat SoftFloat::tan() const noexcept {
+constexpr SF_HOT SoftFloat SoftFloat::tan() const noexcept
+{
+	if (UNLIKELY(mantissa == 0)) return zero();
+
 	auto[s, c] = sincos();
-	if (c.is_zero())
+
+	if (UNLIKELY(c.mantissa == 0)) {
 		return from_raw(s.mantissa >= 0 ? (1 << 29) : -(1 << 29), 127);
-	return s / c;
+	}
+
+	// Use reciprocal + inline multiply (2× faster than operator/)
+	SoftFloat c_inv = c.reciprocal();
+
+	// Inline mul_plain
+	int32_t re = s.exponent + c_inv.exponent + 29;
+	int64_t prod = static_cast<int64_t>(s.mantissa) * static_cast<int64_t>(c_inv.mantissa);
+	int32_t rm = static_cast<int32_t>(prod >> 29);
+	uint32_t abs_m = sf_abs32(rm);
+	if (UNLIKELY(abs_m >= 0x40000000u)) {
+		rm >>= 1;
+		re += 1;
+	}
+	return from_raw(rm, re);
 }
 
 constexpr SoftFloat SoftFloat::sin() const noexcept { 
@@ -2412,88 +2430,88 @@ static constexpr int32_t ATAN_TAB_Q29[257] = {
 	 421657428
 };
 
-constexpr SF_HOT SoftFloat atan2(SoftFloat y, SoftFloat x) noexcept {
+constexpr SF_HOT SoftFloat atan2(SoftFloat y, SoftFloat x) noexcept
+{
+	if (UNLIKELY(x.mantissa == 0 && y.mantissa == 0))
+		return SoftFloat::zero();
 
-	// Q29 constants - these match SoftFloat::half_pi() and pi() mantissas exactly
-	constexpr int32_t HALF_PI_Q29 = 843314857;   // π/2 * 2^29
-	constexpr int32_t PI_Q29 = 1686629713;  // π * 2^29
+	const bool x_neg = x.mantissa < 0;
+	const bool y_neg = y.mantissa < 0;
 
-	// Handle origin
-	if (x.is_zero() && y.is_zero()) return SoftFloat::zero();
+	if (UNLIKELY(y.mantissa == 0))
+		return x_neg ? SoftFloat::pi() : SoftFloat::zero();
+	if (UNLIKELY(x.mantissa == 0))
+		return y_neg ? -SoftFloat::half_pi() : SoftFloat::half_pi();
 
-	// Capture signs and take absolute values
-	const bool x_neg = x.is_negative();
-	const bool y_neg = y.is_negative();
-	x = x.abs();
-	y = y.abs();
+	uint32_t ax = sf_abs32(x.mantissa);
+	uint32_t ay = sf_abs32(y.mantissa);
+	int32_t ex = x.exponent;
+	int32_t ey = y.exponent;
 
-	// Ensure ratio <= 1 by swapping if needed
-	const bool swap = y > x;
-	if (swap) { SoftFloat t = x; x = y; y = t; }
+	bool swap = false;
+	uint32_t num = ay, den = ax;
+	int32_t num_e = ey, den_e = ex;
 
-	// Compute ratio y/x as Q24 fixed-point (range [0, 1] maps to [0, 0x1000000])
-	uint32_t t_Q24 = 0;
-	if (!x.is_zero() && !y.is_zero()) {
-		const uint32_t x_m = static_cast<uint32_t>(x.mantissa);
-		const uint32_t y_m = static_cast<uint32_t>(y.mantissa);
-		const int32_t exp_diff = y.exponent - x.exponent;
-		const int32_t shift = 24 + exp_diff;
-
-		if (shift > -30) {
-			if (shift < 0) {
-				// Ratio is very small
-				t_Q24 = (y_m >> (-shift)) / x_m;
-			}
-			else {
-				const uint32_t eff_shift = static_cast<uint32_t>(shift > 31 ? 31 : shift);
-				const uint64_t num = static_cast<uint64_t>(y_m) << eff_shift;
-
-#if defined(__arm__)
-				if (!SF_IS_CONSTEVAL() && (num >> 32) == 0) {
-					uint32_t q;
-					__asm__("udiv %0, %1, %2" : "=r"(q) : "r"(static_cast<uint32_t>(num)), "r"(x_m));
-					t_Q24 = q;
-				}
-				else {
-					t_Q24 = static_cast<uint32_t>(num / x_m);
-				}
-#else
-				t_Q24 = static_cast<uint32_t>(num / x_m);
-#endif
-			}
-		}
+	if (ey > ex || (ey == ex && ay > ax)) {
+		swap = true;
+		num = ax; den = ay;
+		num_e = ex; den_e = ey;
 	}
 
-	// Table lookup with linear interpolation
-	// idx is the integer part (0-256), frac is the fractional part in Q16
-	const uint32_t idx = t_Q24 >> 16;
-	const uint32_t frac = t_Q24 & 0xFFFFu;
+	int32_t shift = 24 + num_e - den_e;
+	uint32_t t_Q24;
 
-	int32_t angle_q29;
-	if (idx >= 256) {
-		// Ratio is exactly 1.0 (or slightly above due to rounding)
-		angle_q29 = ATAN_TAB_Q29[256];
+	if (LIKELY(shift >= 0)) {
+		uint64_t n = static_cast<uint64_t>(num) << shift;
+		t_Q24 = static_cast<uint32_t>(n / den);
 	}
 	else {
-		const int32_t a0 = ATAN_TAB_Q29[idx];
-		const int32_t a1 = ATAN_TAB_Q29[idx + 1];
-		// Linear interpolation: a0 + (a1 - a0) * frac / 65536
-		angle_q29 = a0 + static_cast<int32_t>((static_cast<int64_t>(a1 - a0) * frac) >> 16);
+		uint32_t sn = num >> (-shift);
+		t_Q24 = sn / den;
 	}
 
-	// Quadrant adjustments - all in Q29 fixed-point
-	// After table lookup: angle is in [0, π/4]
-	// After swap:         angle is in [0, π/2]
-	// After x_neg:        angle is in [0, π]
-	// After y_neg:        angle is in [-π, π]
+	// ── CRITICAL FIX: Clamp to prevent array overflow ──
+	if (UNLIKELY(t_Q24 >= 0x1000000u)) t_Q24 = 0xFFFFFFu;
+
+	uint32_t idx = t_Q24 >> 16; // 0..255 guaranteed
+	uint32_t frac = t_Q24 & 0xFFFFu;
+
+	int32_t a0 = ATAN_TAB_Q29[idx];
+	int32_t a1 = ATAN_TAB_Q29[idx + 1]; // Safe: idx ≤ 255, array has 257 entries
+
+	// ── CRITICAL FIX: int64_t intermediate to prevent signed overflow ──
+	int64_t delta = static_cast<int64_t>(a1) - static_cast<int64_t>(a0);
+	int64_t prod = delta * static_cast<int64_t>(frac);
+	int32_t angle_q29 = a0 + static_cast<int32_t>(prod >> 16);
+
+	constexpr int32_t HALF_PI_Q29 = 843314857;
+	constexpr int32_t PI_Q29 = 1686629713;
 
 	if (swap)  angle_q29 = HALF_PI_Q29 - angle_q29;
 	if (x_neg) angle_q29 = PI_Q29 - angle_q29;
 	if (y_neg) angle_q29 = -angle_q29;
 
-	// Single conversion to SoftFloat at the end
-	// The constructor normalizes automatically
-	return SoftFloat(angle_q29, -29);
+	// ── CRITICAL FIX: constexpr-safe path ──
+	if (SF_IS_CONSTEVAL()) {
+		return SoftFloat(angle_q29, -29);
+	}
+
+	// Runtime fast path
+	int32_t m = angle_q29;
+	int32_t e = -29;
+	uint32_t a = m < 0 ? static_cast<uint32_t>(-m) : static_cast<uint32_t>(m);
+
+	if (a >= 0x40000000u) {
+		m >>= 1;
+		e += 1;
+	}
+	else if (a < 0x20000000u && a != 0) {
+		int lz = sf_clz(a);
+		int s = lz - 2;
+		m <<= s;
+		e -= s;
+	}
+	return SoftFloat::from_raw(m, e);
 }
 
 #else
