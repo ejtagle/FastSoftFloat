@@ -310,18 +310,18 @@ namespace SoftFloatTest {
 
 	static bool test_sin() {
 		bool ok = true;
-		ok &= chk(approx((float)sf_sin(SoftFloat(0.f)), 0.f, 32), "  sin(0)\n");
-		ok &= chk(approx((float)sf_sin(SoftFloat::half_pi()), 1.f, 256, 1e-3f), "  sin(pi/2)\n");
-		ok &= chk(approx((float)sf_sin(-SoftFloat::half_pi()), -1.f, 256, 1e-3f), "  sin(-pi/2)\n");
-		ok &= chk(fabsf((float)sf_sin(SoftFloat::pi())) < 1e-3f, "  sin(pi)\n");
+		ok &= chk(approx((float)sin(SoftFloat(0.f)), 0.f, 32), "  sin(0)\n");
+		ok &= chk(approx((float)sin(SoftFloat::half_pi()), 1.f, 256, 1e-3f), "  sin(pi/2)\n");
+		ok &= chk(approx((float)sin(-SoftFloat::half_pi()), -1.f, 256, 1e-3f), "  sin(-pi/2)\n");
+		ok &= chk(fabsf((float)sin(SoftFloat::pi())) < 1e-3f, "  sin(pi)\n");
 		return ok;
 	}
 
 	static bool test_cos() {
 		bool ok = true;
-		ok &= chk(approx((float)sf_cos(SoftFloat(0.f)), 1.f, 256, 1e-3f), "  cos(0)\n");
-		ok &= chk(approx((float)sf_cos(SoftFloat::pi()), -1.f, 256, 1e-3f), "  cos(pi)\n");
-		ok &= chk(fabsf((float)sf_cos(SoftFloat::half_pi())) < 1e-3f, "  cos(pi/2)\n");
+		ok &= chk(approx((float)cos(SoftFloat(0.f)), 1.f, 256, 1e-3f), "  cos(0)\n");
+		ok &= chk(approx((float)cos(SoftFloat::pi()), -1.f, 256, 1e-3f), "  cos(pi)\n");
+		ok &= chk(fabsf((float)cos(SoftFloat::half_pi())) < 1e-3f, "  cos(pi/2)\n");
 		return ok;
 	}
 
@@ -335,19 +335,19 @@ namespace SoftFloatTest {
 
 	static bool test_minmax() {
 		bool ok = true;
-		ok &= approx((float)sf_min(SoftFloat(5.f), SoftFloat(10.f)), 5.f);
-		ok &= approx((float)sf_max(SoftFloat(5.f), SoftFloat(10.f)), 10.f);
-		ok &= approx((float)sf_min(SoftFloat(-5.f), SoftFloat(5.f)), -5.f);
-		ok &= approx((float)sf_max(SoftFloat(-5.f), SoftFloat(5.f)), 5.f);
+		ok &= approx((float)min(SoftFloat(5.f), SoftFloat(10.f)), 5.f);
+		ok &= approx((float)max(SoftFloat(5.f), SoftFloat(10.f)), 10.f);
+		ok &= approx((float)min(SoftFloat(-5.f), SoftFloat(5.f)), -5.f);
+		ok &= approx((float)max(SoftFloat(-5.f), SoftFloat(5.f)), 5.f);
 		return ok;
 	}
 
 	static bool test_clamp() {
 		bool ok = true;
 		SoftFloat lo(0.f), hi(10.f);
-		ok &= approx((float)sf_clamp(SoftFloat(5.f), lo, hi), 5.f);
-		ok &= approx((float)sf_clamp(SoftFloat(15.f), lo, hi), 10.f);
-		ok &= approx((float)sf_clamp(SoftFloat(-5.f), lo, hi), 0.f);
+		ok &= approx((float)clamp(SoftFloat(5.f), lo, hi), 5.f);
+		ok &= approx((float)clamp(SoftFloat(15.f), lo, hi), 10.f);
+		ok &= approx((float)clamp(SoftFloat(-5.f), lo, hi), 0.f);
 		return ok;
 	}
 
@@ -813,8 +813,8 @@ namespace SoftFloatTest {
 		bool ok = true;
 		auto check = [&](SoftFloat x, const char* ctx) {
 			if (x.mantissa == 0) return true;
-			uint32_t a = sf_abs32(x.mantissa);
-			int lz = sf_clz(a);
+			uint32_t a = labs(x.mantissa);
+			int lz = __builtin_clz(a);
 			if (lz != 2) {
 				char b[128];
 				snprintf(b, sizeof b, "  INV FAIL %s: mant=0x%08X clz=%d (exp %d)\n",
@@ -987,10 +987,10 @@ namespace SoftFloatTest {
 
 		// Test saturation directly
 		SoftFloat t1(0x20000000, 200);
-		ok &= chk(t1.exponent == 127, "  sf_normalise exp overflow clamp");
+		ok &= chk(t1.exponent == 127, "  normalise exp overflow clamp");
 
 		SoftFloat t2(0x20000000, -200);
-		ok &= chk(t2.exponent == -128, "  sf_normalise exp underflow clamp");
+		ok &= chk(t2.exponent == -128, "  normalise exp underflow clamp");
 
 		return ok;
 	}
@@ -1078,11 +1078,11 @@ namespace SoftFloatTest {
 		SoftFloat r1 = -(a * b);
 		ok &= chk(approx((float)r1, -6.f), "  -(a*b)");
 
-		// a - (b*c)  [uses operator-(SoftFloat, sf_mul_expr)]
+		// a - (b*c)  [uses operator-(SoftFloat, mul_expr)]
 		SoftFloat r2 = a - (b * c);
 		ok &= chk(approx((float)r2, 2.f - 12.f), "  a - (b*c)");
 
-		// (a*b) - c  [uses operator-(sf_mul_expr, SoftFloat)]
+		// (a*b) - c  [uses operator-(mul_expr, SoftFloat)]
 		// Fixed in library to be: -(fms(c, a, b))
 		SoftFloat r3 = (a * b) - c;
 		ok &= chk(approx((float)r3, 6.f - 4.f), "  (a*b) - c");

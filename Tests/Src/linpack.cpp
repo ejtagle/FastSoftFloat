@@ -38,7 +38,7 @@
 #define ONE         1.0f
 #define PREC        "SoftFloat"
 #define BASE10DIG   FLT_DIG
-#define ABS(X)      sf_abs(X)
+#define ABS(X)      abs(X)
 
 typedef SoftFloat   REAL;
 #endif
