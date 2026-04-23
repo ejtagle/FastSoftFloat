@@ -946,6 +946,10 @@ public:
 	constexpr SoftFloat& operator*=(SoftFloat r) noexcept;
 	constexpr SoftFloat& operator/=(SoftFloat r) noexcept { *this = *this / r; return *this; }
 
+	// --- FMA autodetection: a += b * c  →  fused_mul_add(a, b, c) ---
+	constexpr SF_HOT SF_INLINE SoftFloat& operator+=(const MulExpr& m) noexcept;
+	constexpr SF_HOT SF_INLINE SoftFloat& operator-=(const MulExpr& m) noexcept;
+	
 	// ------------------------------------------------------------------
 	// Constants
 	// ------------------------------------------------------------------
@@ -1072,6 +1076,15 @@ constexpr SF_HOT SF_INLINE SoftFloat::SoftFloat(const MulExpr& m) noexcept {
 	return SoftFloat(a) * b;
 }
 
+// --- FMA autodetection: a += b * c  →  fused_mul_add(a, b, c) ---
+constexpr SF_HOT SF_INLINE SoftFloat& SoftFloat::operator+=(const MulExpr& m) noexcept {
+	*this = fused_mul_add(*this, m.lhs, m.rhs);
+	return *this;
+}
+constexpr SF_HOT SF_INLINE SoftFloat& SoftFloat::operator-=(const MulExpr& m) noexcept {
+	*this = fused_mul_sub(*this, m.lhs, m.rhs);
+	return *this;
+}
 constexpr SoftFloat& SoftFloat::operator*=(SoftFloat r) noexcept {
 	*this = *this * r;
 	return *this;
@@ -2991,3 +3004,26 @@ static_assert(hypot(SoftFloat::three(), SoftFloat::four()).to_float() == 5.0f);
 static_assert((SoftFloat::one() + SoftFloat::two() * SoftFloat::three()).to_float() == 7.0f);
 static_assert((SoftFloat::two() * SoftFloat::three() - SoftFloat::one()).to_float() == 5.0f);
 static_assert((-(SoftFloat::two() * SoftFloat::three())).to_float() == -6.0f);
+
+// FMA autodetection via += / -=
+static_assert([]() consteval {
+	SoftFloat a = SoftFloat::one();
+	a += SoftFloat::two() * SoftFloat::three(); // 1 + 2*3 = 7
+	return a.to_float() == 7.0f;
+}());
+
+static_assert([]() consteval {
+	SoftFloat a = SoftFloat(10.0f);
+	a -= SoftFloat::two() * SoftFloat::three(); // 10 - 2*3 = 4
+	return a.to_float() == 4.0f;
+}());
+
+// Verify it's actually fused (same precision as explicit fused_mul_add)
+static_assert([]() consteval {
+	SoftFloat a = SoftFloat::one();
+	SoftFloat b = SoftFloat::two();
+	SoftFloat c = SoftFloat::three();
+	SoftFloat r1 = a; r1 += b * c;
+	SoftFloat r2 = fused_mul_add(a, b, c);
+	return r1 == r2;
+}());
