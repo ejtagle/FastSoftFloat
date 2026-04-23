@@ -124,8 +124,8 @@ public:
 		return e;
 	}
 
-	static constexpr void normalise_fast(int32_t& m, int32_t& e) noexcept;
-	[[nodiscard]] static constexpr uint32_t recip32(uint32_t b) noexcept;
+	static constexpr SF_INLINE void normalise_fast(int32_t& m, int32_t& e) noexcept;
+	[[nodiscard]] static constexpr SF_CONST SF_INLINE uint32_t recip32(uint32_t b) noexcept;
 
 	// ------------------------------------------------------------------
 	// Data
@@ -1080,7 +1080,7 @@ constexpr SoftFloat& SoftFloat::operator*=(SoftFloat r) noexcept {
 // =========================================================================
 // normalise_fast definition
 // =========================================================================
-constexpr void SoftFloat::normalise_fast(int32_t& m, int32_t& e) noexcept
+constexpr SF_INLINE void SoftFloat::normalise_fast(int32_t& m, int32_t& e) noexcept
 {
 	if (SF_IS_CONSTEVAL()) {
 		uint32_t sign = static_cast<uint32_t>(m >> 31);
@@ -1167,7 +1167,7 @@ constexpr void SoftFloat::normalise_fast(int32_t& m, int32_t& e) noexcept
 // =========================================================================
 // recip32 definition
 // =========================================================================
-[[nodiscard]] constexpr uint32_t SoftFloat::recip32(uint32_t b) noexcept
+[[nodiscard]] constexpr SF_CONST SF_INLINE uint32_t SoftFloat::recip32(uint32_t b) noexcept
 {
 	static constexpr uint32_t recip_tab[512] = {
 		0x80000000u, 0x7FC01FF0u, 0x7F807F80u, 0x7F411E52u,
