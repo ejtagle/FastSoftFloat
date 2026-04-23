@@ -1130,26 +1130,21 @@ constexpr SF_INLINE void SoftFloat::normalise_fast(int32_t& m, int32_t& e) noexc
 			return;
 		}
 
-		uint32_t lz;
-		__asm__(
-			"clz %0, %1"
-			: "=r"(lz)
-			: "r"(a));
-		int32_t shift = static_cast<int32_t>(lz) - 2;
-
-		if (shift > 0) {
-			a <<= shift;
-			e -= shift;
-		}
-		else {
+		if (UNLIKELY(a & MANT_OVERFLOW)) {
 			a >>= 1;
 			e += 1;
 		}
+		else {
+			uint32_t lz;
+			__asm__("clz %0, %1" : "=r"(lz) : "r"(a));
+			int32_t shift = static_cast<int32_t>(lz) - 2;
+			// shift > 0 is guaranteed: bit 30 is clear (overflow handled above)
+			// and bit 29 is clear (fast path handled above)
+			a <<= shift;
+			e -= shift;
+		}
 
-		__asm__(
-			"ssat %0, #8, %1"
-			: "=r"(e)
-			: "r"(e));
+		__asm__("ssat %0, #8, %1" : "=r"(e) : "r"(e));
 		m = static_cast<int32_t>((a ^ sign) - sign);
 		return;
 	}
