@@ -17,7 +17,11 @@ bsp_compile_flags($<$<COMPILE_LANGUAGE:CXX>:-std=c++23 -Wno-volatile>)
 
 add_bsp_based_executable(
 	NAME EmbeddedUnitTests
-	SOURCES ${BSP_ROOT}/Tests/Src/tests.cpp ${BSP_ROOT}/Tests/Inc/FusedSoftFloat.hh ${BSP_ROOT}/Tests/Src/linpack.cpp
+	SOURCES
+		${BSP_ROOT}/Tests/Src/tests.cpp
+		${BSP_ROOT}/Tests/Inc/FusedSoftFloat.hh
+		${BSP_ROOT}/Tests/Src/linpack.cpp
+		${BSP_ROOT}/Tests/Src/Whetstones.cpp
 	GENERATE_BIN
 	GENERATE_MAP
 	GENERATE_HEX)

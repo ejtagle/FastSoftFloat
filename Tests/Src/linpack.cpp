@@ -64,7 +64,7 @@ typedef float   REAL;
 typedef double  REAL;
 #endif
 
-static int64_t linpack  (long nreps,int arsize);
+static double linpack  (long nreps,int arsize);
 static void matgen   (REAL *a,int lda,int n,REAL *b,REAL *norma);
 static void dgefa    (REAL *a,int lda,int n,int *ipvt,int *info,int roll);
 static void dgesl    (REAL *a,int lda,int n,int *ipvt,REAL *b,int job,int roll);
@@ -75,7 +75,7 @@ static void daxpy_ur (int n,REAL da,REAL *dx,int incx,REAL *dy,int incy);
 static REAL ddot_ur  (int n,REAL *dx,int incx,REAL *dy,int incy);
 static void dscal_ur (int n,REAL da,REAL *dx,int incx);
 static int  idamax   (int n,REAL *dx,int incx);
-static int64_t second   (void);
+static double second   (void);
 
 static constexpr int arsize = 100;  // Must br multiple of 2, >= 10
 static constexpr int arsize2d = (long)arsize*(long)arsize;
@@ -94,20 +94,20 @@ extern "C" void linpack(void)
     printf("    Reps Time(s) DGEFA   DGESL  OVERHEAD    KFLOPS\n");
     printf("----------------------------------------------------\n");
     int nreps=1;
-    while (linpack(nreps,arsize)<6000000000LL)
+    while (linpack(nreps,arsize)<6.0)
         nreps*=2;
     printf("\n");
 }
 
 
-static int64_t linpack(long nreps,int arsize)
+static double linpack(long nreps,int arsize)
 
     {
     REAL  *a,*b;
     REAL   norma;
 	double ops;
 	double kflops;    
-	int64_t t1, totalt, tdgefa, tdgesl, toverhead;
+	double t1, totalt, tdgefa, tdgesl, toverhead;
     int   *ipvt,n,info,lda;
     long   i,arsize2d;
 
@@ -142,9 +142,9 @@ static int64_t linpack(long nreps,int arsize)
         tdgesl += second()-t1;
         }
     totalt=second()-totalt;
-    if (totalt<500000000LL || tdgefa+tdgesl < 200000000LL)
+    if (totalt<0.5 || tdgefa+tdgesl < 0.2)
         return 0;
-    kflops=2.*nreps*ops/(1000.*(tdgefa+tdgesl)*1e-9);
+    kflops=2.*nreps*ops/(1000.*(tdgefa+tdgesl));
     toverhead=totalt-tdgefa-tdgesl;
     if (tdgefa<0)
         tdgefa=0;
@@ -154,7 +154,7 @@ static int64_t linpack(long nreps,int arsize)
         toverhead=0;
     printf("%8ld %6.2f %6.2f%% %6.2f%% %6.2f%%  %9.3f\n",
             nreps,
-		    totalt*1e-9,
+		    totalt,
 		    100.*double(tdgefa)/double(totalt),
             100.*double(tdgesl)/double(totalt),
 		    100.*double(toverhead)/double(totalt),
@@ -866,11 +866,20 @@ static int idamax(int n,REAL *dx,int incx)
     }
 
 extern "C" uint64_t DWT_GetTimeNs();
+extern "C" uint32_t DWT_GetCycleCount(void);
+extern "C" uint32_t GetSysClockFreq(void); // in Hz
 
-static int64_t second(void)
 
-    {
-	    return DWT_GetTimeNs();
-    }
-
+static uint32_t prev_cyc = 0;
+static uint64_t cyc_base = 0;
+static double second(void)
+{
+	uint64_t cyc = DWT_GetCycleCount();
+	if (cyc < prev_cyc)
+	{
+		cyc_base += (uint64_t)UINT32_MAX + 1;
+	}
+	prev_cyc = cyc;
+	return double(cyc + cyc_base) / GetSysClockFreq();
+}
 

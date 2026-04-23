@@ -911,6 +911,10 @@ public:
 	[[nodiscard]] constexpr SF_HOT SF_PURE SoftFloat tan() const noexcept;
 	[[nodiscard]] constexpr SF_HOT SF_PURE SoftFloat asin() const noexcept;
 	[[nodiscard]] constexpr SF_HOT SF_PURE SoftFloat acos() const noexcept;
+	[[nodiscard]] constexpr SF_HOT SF_PURE SoftFloat atan() const noexcept
+	{
+		return atan2(*this, SoftFloat::one());
+	}
 	[[nodiscard]] constexpr SF_HOT SF_PURE SoftFloat sinh() const noexcept;
 	[[nodiscard]] constexpr SF_HOT SF_PURE SoftFloat cosh() const noexcept;
 	[[nodiscard]] constexpr SF_HOT SF_PURE SoftFloat tanh() const noexcept;
@@ -1016,6 +1020,7 @@ struct SoftFloat::MulExpr {
 	[[nodiscard]] constexpr SoftFloat tan()               const noexcept { return eval().tan(); }
 	[[nodiscard]] constexpr SoftFloat asin()              const noexcept { return eval().asin(); }
 	[[nodiscard]] constexpr SoftFloat acos()              const noexcept { return eval().acos(); }
+	[[nodiscard]] constexpr SoftFloat atan()              const noexcept { return eval().atan(); }
 	[[nodiscard]] constexpr SoftFloat sinh()              const noexcept { return eval().sinh(); }
 	[[nodiscard]] constexpr SoftFloat cosh()              const noexcept { return eval().cosh(); }
 	[[nodiscard]] constexpr SoftFloat tanh()              const noexcept { return eval().tanh(); }
@@ -1562,6 +1567,7 @@ SoftFloat operator-(const SoftFloat::MulExpr& m, SoftFloat a) noexcept {
 [[nodiscard]] constexpr SoftFloat tan(SoftFloat x)                                noexcept { return x.tan(); }
 [[nodiscard]] constexpr SoftFloat asin(SoftFloat x)                               noexcept { return x.asin(); }
 [[nodiscard]] constexpr SoftFloat acos(SoftFloat x)                               noexcept { return x.acos(); }
+[[nodiscard]] constexpr SoftFloat atan(SoftFloat x)                               noexcept { return x.atan(); }
 [[nodiscard]] constexpr SoftFloat sinh(SoftFloat x)                               noexcept { return x.sinh(); }
 [[nodiscard]] constexpr SoftFloat cosh(SoftFloat x)                               noexcept { return x.cosh(); }
 [[nodiscard]] constexpr SoftFloat tanh(SoftFloat x)                               noexcept { return x.tanh(); }
@@ -2907,6 +2913,9 @@ static_assert(ct_approx(SoftFloat(0.5f).acos().to_float(), 1.04719755f, 16));
 static_assert(ct_approx(SoftFloat(1.0f).acos().to_float(), 0.0f, 2));
 static_assert(ct_approx(SoftFloat(-0.5f).acos().to_float(), 2.09439510f, 4));
 static_assert(ct_approx(SoftFloat(-1.0f).acos().to_float(), 3.14159265f, 4));
+
+static_assert(atan(SoftFloat::zero()).to_float() == 0.0f);
+static_assert(ct_approx(atan(SoftFloat::one()).to_float(), SoftFloat::half_pi().to_float() / 2.0f, 256));
 
 // atan2
 static_assert(atan2(SoftFloat::one(), SoftFloat::zero()).to_float() == SoftFloat::half_pi().to_float());

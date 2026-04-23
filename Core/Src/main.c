@@ -74,6 +74,7 @@ uint64_t DWT_GetTimeNs() {
 void initialise_monitor_handles(void);
 int main_tests(void);
 void linpack(void);
+void test_whetstones(void);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -125,6 +126,7 @@ int main(void)
   {
       main_tests();
 	  linpack();
+	  test_whetstones();
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
