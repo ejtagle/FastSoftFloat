@@ -1,6 +1,6 @@
-# SoftFloat library
+# An ultra fast SoftFloat library
 
-This library is a soft float implementation optimized for speed for the ARM Cortex M3 based microcontrollers</br>
+This library is an ultra fast soft float implementation optimized for speed for the ARM Cortex M3 based microcontrollers</br>
 It is written in C++20, and is constexpr, so all calculations that can be done at compile time will be</br>
 It also implements autodetection and optimization of fused multiplications and additions, to increase speed and accuracy</br>
 
