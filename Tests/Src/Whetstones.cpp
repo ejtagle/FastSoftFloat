@@ -13,7 +13,7 @@
  *                    results on P3 to P6 based PCs.        
  *
  *  Contributor:      Roy Longbottom 101323.2241@compuserve.com
-	*                         or     Roy_Longbottom@compuserve.com
+ *                         or     Roy_Longbottom@compuserve.com
  *
  ************************************************************
  *
