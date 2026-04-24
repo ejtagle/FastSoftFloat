@@ -284,23 +284,47 @@
 
 /*PRECISION PRECISION PRECISION PRECISION PRECISION PRECISION PRECISION*/
 
-#define SF
-/* #define SP */
+/* #define SF */
+#define SP
 /* #define DP */
  
 #ifdef DP 
 #define SPDP double
 #define Precision "Double"
+#define SIN sin
+#define COS cos	
+#define TAN tan
+#define ATAN atan
+#define ATAN2 atan2
+#define SQRT sqrt
+#define EXP exp
+#define LOG log
 #endif
 
 #ifdef SP
 #define SPDP float
 #define Precision "Single"
+#define SIN sinf
+#define COS cosf	
+#define TAN tanf
+#define ATAN atanf
+#define ATAN2 atan2f
+#define SQRT sqrtf
+#define EXP expf
+#define LOG logf
 #endif
 
 #ifdef SF
 #define SPDP SoftFloat
 #define Precision "SoftFloat"
+#define SIN sin
+#define COS cos	
+#define TAN tan
+#define ATAN atan
+#define ATAN2 atan2
+#define SQRT sqrt
+#define EXP exp
+#define LOG log
 #endif
 
 extern "C" uint64_t DWT_GetTimeNs();
@@ -546,8 +570,8 @@ void whetstones(long xtra, long x100, int calibrate)
 		{
 			for (i = 1; i < n5; i++)
 			{
-				x = t*atan(t2*sin(x)*cos(x) / (cos(x + y) + cos(x - y) - 1.0f));
-				y = t*atan(t2*sin(y)*cos(y) / (cos(x + y) + cos(x - y) - 1.0f));
+				x = t*ATAN(t2*SIN(x)*COS(x) / (COS(x + y) + COS(x - y) - 1.0f));
+				y = t*ATAN(t2*SIN(y)*COS(y) / (COS(x + y) + COS(x - y) - 1.0f));
 			}
 			t = 1.0f - t;
 		}
@@ -619,7 +643,7 @@ void whetstones(long xtra, long x100, int calibrate)
 		{
 			for (i = 0; i < n8; i++)
 			{
-				x = sqrt(exp(log(x) / t1));
+				x = SQRT(EXP(LOG(x) / t1));
 			}
 		}
 	}

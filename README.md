@@ -71,3 +71,202 @@ No NaN, +/-Inf are handled and/or created</br>
 
 ### Performance
 At this point, the library is nearly 8 times slower than hardware float support.
+
+
+##### Results from running in a STM32F407 @ 168Mhz
+
+===========================================================
+  SoftFloat Test Suite
+===========================================================
+
+
+=== FUNCTIONAL TESTS ===
+[PASS] Default Constructor
+[PASS] Integer Constructor
+[PASS] Float Constructor
+[PASS] Constants
+[PASS] Addition
+[PASS] Subtraction
+[PASS] Multiplication
+[PASS] Division
+[PASS] Negation
+[PASS] Absolute Value
+[PASS] Comparison
+[PASS] Shift Operators
+[PASS] Fused Multiply-Add
+[PASS] Fused Multiply-Sub
+[PASS] Fused Multiply-Multiply-Add
+[PASS] Square Root
+[PASS] Inverse Square Root
+[PASS] Sine
+[PASS] Cosine
+[PASS] Linear Interpolation
+[PASS] Min/Max
+[PASS] Clamp
+[PASS] Integer Conversion
+[PASS] Chained Operations
+[PASS] Overflow Handling
+[PASS] Underflow Handling
+[PASS] Edge Cases
+[PASS] Compound Assignment
+[PASS] Expression Templates
+[PASS] Fused Multiply-Sub (ext)
+[PASS] Fused Mul-Mul-Sub (ext)
+[PASS] Invariant Normalization
+[PASS] Zero Semantics
+[PASS] Div/Zero & Inf Inputs
+[PASS] Int Conv Edges
+[PASS] Exponent Saturation
+[PASS] Math Symmetries
+[PASS] Lerp Edges
+[PASS] Expr Negation
+[PASS] Constexpr Complex
+[PASS] Shift Edges
+[PASS] Comparison Logic
+[PASS] Corner Cases & Bit Patterns
+[PASS] atan2
+  atan2 worst case error: 0.00 degree
+[PASS] atan2 (v2)
+[PASS] exp
+[PASS] hypot
+[PASS] tan
+[PASS] asin/acos
+[PASS] log/log2/log10
+[PASS] pow
+[PASS] rounding
+[PASS] hyperbolic
+[PASS] copysign/fmod
+[PASS] Random Stress Test
+
+-----------------------------------------------------------
+Results: 55/55 passed, 0 failed
+-----------------------------------------------------------
+
+=== BENCHMARKS ===
+| Operation |             : |    timing     |
+|-----------|:-------------:|--------------:|
+| Multiply  | (100000 ops): |  184.58 ns/op |
+| Add       | (100000 ops): |  250.75 ns/op |
+| Subtract  | (100000 ops): |  375.10 ns/op |
+| Divide    | (100000 ops): |  309.61 ns/op |
+| FMA       | (100000 ops): |  809.71 ns/op |
+| FMS       | (100000 ops): |  732.31 ns/op |
+| FMMA      | (100000 ops): | 1000.22 ns/op |
+| FMMS      | (100000 ops): | 1101.43 ns/op |
+| sin       | (100000 ops): |  922.83 ns/op |
+| cos       | (100000 ops): |  928.79 ns/op |
+| tan       | (100000 ops): | 1274.19 ns/op |
+| asin      | (100000 ops): | 2125.81 ns/op |
+| acos      | (100000 ops): | 2063.13 ns/op |
+| atan2     | (100000 ops): | 1274.08 ns/op |
+| sinh      | (100000 ops): | 1452.69 ns/op |
+| cosh      | (100000 ops): | 1452.69 ns/op |
+| tanh      | (100000 ops): | 1732.51 ns/op |
+| exp       | (100000 ops): |  726.36 ns/op |
+| log       | (100000 ops): |  625.14 ns/op |
+| log2      | (100000 ops): |  547.75 ns/op |
+| log10     | (100000 ops): |  631.10 ns/op |
+| pow       | (100000 ops): |  708.49 ns/op |
+| sqrt      | (100000 ops): |  184.59 ns/op |
+| inv_sqrt  | (100000 ops): |  214.35 ns/op |
+| floor     | (100000 ops): |  303.66 ns/op |
+| ceil      | (100000 ops): |  565.61 ns/op |
+| trunc     | (100000 ops): |  321.52 ns/op |
+| round     | (100000 ops): |  333.42 ns/op |
+| fract     | (100000 ops): |  672.77 ns/op |
+| modf      | (100000 ops): |  720.40 ns/op |
+| abs       | (100000 ops): |   59.56 ns/op |
+| copysign  | (100000 ops): |   59.56 ns/op |
+| fmod      | (100000 ops): |  672.77 ns/op |
+| hypot     | (100000 ops): |  476.75 ns/op |
+| lerp      | (100000 ops): |  970.45 ns/op |
+| compare < | (100000 ops): |  107.19 ns/op |
+| compare = | (100000 ops): |   23.84 ns/op |
+| shift <<  | (100000 ops): |   77.42 ns/op |
+| shift >>  | (100000 ops): |   71.47 ns/op |
+| to_float  | (100000 ops): |   59.56 ns/op |
+| to_int32  | (100000 ops): |  101.23 ns/op |
+| from_floa | (100000 ops): |   23.84 ns/op |
+| from_int  | (100000 ops): |  196.49 ns/op |
+| Dot4      | (100000 ops): | 2643.95 ns/op |
+
+ALL TESTS PASSED
+
+
+##### Results for our SoftFloat implementation
+
+LINPACK benchmark, SoftFloat precision.
+Machine precision:  6 digits.
+Array size 100 X 100.
+Average rolled and unrolled performance:
+
+| Reps | Time(s) | DGEFA  | DGESL | OVERHEAD | KFLOPS   |
+|------|---------|--------|-------|----------|----------|
+| 16   | 0.88    | 85.08% | 5.18% | 9.74%    | 3561.242 |
+| 32   | 1.76    | 85.08% | 5.18% | 9.74%    | 3561.244 |
+| 64   | 3.52    | 85.08% | 5.18% | 9.74%    | 3561.239 |
+| 128  | 7.04    | 85.08% | 5.18% | 9.74%    | 3561.228 |
+
+Calibrate
+| 0.28 Seconds |  1 | Passes (x 100) |
+| 1.38 Seconds |  5 | Passes (x 100) |
+| 6.92 Seconds | 25 | Passes (x 100) |
+
+Use 361  passes (x 100)
+
+          SoftFloat Precision C/C++ Whetstone Benchmark
+
+| Loop content      |         Result       | MFLOPS |  MOPS  | Seconds|
+|-------------------|----------------------|--------|--------|--------|
+| N1 floating point | -1.12444269657135010 | 39.048 |        |  0.178 |
+| N2 floating point | -1.12243998050689697 |  2.567 |        | 18.898 |
+| N3 if then else   |  1.00000000000000000 |        | 83.981 |  0.445 |
+| N4 fixed point    | 12.00000000000000000 |        | 83.975 |  1.354 |
+| N5 sin,cos etc.   |  0.49188536405563354 |        |  1.800 | 16.687 |
+| N6 floating point |  0.99991601705551147 | 75.377 |        |  2.583 |
+| N7 assignments    |  3.00000000000000000 |        | 71.985 |  0.927 |
+| N8 exp,sqrt etc.  |  0.75000041723251343 |        |  2.624 |  5.117 |
+|-------------------|----------------------|--------|--------|--------|
+| MWIPS             |                      | 78.159 |        | 46.188 |
+
+##### Results for hardware float implementation
+
+LINPACK benchmark, Single precision.
+Machine precision:  6 digits.
+Array size 100 X 100.
+Average rolled and unrolled performance:
+
+| Reps | Time(s) | DGEFA  | DGESL | OVERHEAD | KFLOPS    |
+|------|---------|--------|-------|----------|-----------|
+| 128  | 0.93    | 79.53% | 4.89% | 15.58%   | 28912.676 |
+| 256  | 1.85    | 79.53% | 4.89% | 15.58%   | 28912.655 |
+| 512  | 3.71    | 79.53% | 4.89% | 15.58%   | 28912.678 |
+| 1024 | 7.41    | 79.53% | 4.89% | 15.58%   | 28912.311 |
+
+Calibrate
+| 0.05 Seconds |   1 | Passes (x 100) |
+| 0.26 Seconds |   5 | Passes (x 100) |
+| 1.32 Seconds |  25 | Passes (x 100) |
+| 6.62 Seconds | 125 | Passes (x 100) |
+
+Use 1889  passes (x 100)
+
+          Single Precision C/C++ Whetstone Benchmark
+
+| Loop content      |         Result       | MFLOPS |  MOPS  | Seconds|
+|-------------------|----------------------|--------|--------|--------|
+| N1 floating point | -1.12391686439514160 | 116.845|        |   0.310|
+| N2 floating point | -1.12191414833068848 |  82.272|        |   3.086|
+| N3 if then else   |  1.00000000000000000 |        | 100.779|   1.940|
+| N4 fixed point    | 12.00000000000000000 |        |8670.000|   0.000|
+| N5 sin,cos etc.   |  0.49909299612045288 |        |   9.914|  15.853|
+| N6 floating point |  0.99999982118606567 |  62.988|        |  16.177|
+| N7 assignments    |  3.00000000000000000 |        |  71.985|   4.849|
+| N8 exp,sqrt etc.  |  0.75110864639282227 |        |  10.566|   6.651|
+|-------------------|----------------------|--------|--------|--------|
+| MWIPS             |                      | 386.563|        |  48.866|
+
+##### Conclusion
+
+Our software floating point is 386.563 / 78.159 = 4.95 times slower than hardware floating point on the Whetstone benchmark and 28912.311 / 3561.228 = 8.11 times slower in the Linpack benchmark.
+

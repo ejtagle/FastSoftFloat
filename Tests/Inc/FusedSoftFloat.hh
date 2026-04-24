@@ -1,5 +1,15 @@
+/*
+ * FusedSoftFloat library/header
+ * 
+ * Copyright (c) 2026 Eduardo José Tagle (ejtagle@hotmail.com)
+ * 
+ * This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/.
+ */
+
 /** @file FusedSoftFloat.hh
- *  @brief SoftFloat optimised for GD32F103 (Cortex-M3, ARMv7-M)
+ *  @brief SoftFloat optimised for Cortex-M3, ARMv7-M
  *
  *  Representation:
  *    value = mantissa * 2^exponent
