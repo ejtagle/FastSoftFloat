@@ -73,70 +73,67 @@ No NaN, +/-Inf are handled and/or created</br>
 At this point, the library is nearly 8 times slower than hardware float support.
 
 
-##### Results from running in a STM32F407 @ 168Mhz
+### Results from running in a STM32F407 @ 168Mhz
 
-===========================================================
-  SoftFloat Test Suite
-===========================================================
+##  SoftFloat Test Suite
 
-
-=== FUNCTIONAL TESTS ===
-[PASS] Default Constructor
-[PASS] Integer Constructor
-[PASS] Float Constructor
-[PASS] Constants
-[PASS] Addition
-[PASS] Subtraction
-[PASS] Multiplication
-[PASS] Division
-[PASS] Negation
-[PASS] Absolute Value
-[PASS] Comparison
-[PASS] Shift Operators
-[PASS] Fused Multiply-Add
-[PASS] Fused Multiply-Sub
-[PASS] Fused Multiply-Multiply-Add
-[PASS] Square Root
-[PASS] Inverse Square Root
-[PASS] Sine
-[PASS] Cosine
-[PASS] Linear Interpolation
-[PASS] Min/Max
-[PASS] Clamp
-[PASS] Integer Conversion
-[PASS] Chained Operations
-[PASS] Overflow Handling
-[PASS] Underflow Handling
-[PASS] Edge Cases
-[PASS] Compound Assignment
-[PASS] Expression Templates
-[PASS] Fused Multiply-Sub (ext)
-[PASS] Fused Mul-Mul-Sub (ext)
-[PASS] Invariant Normalization
-[PASS] Zero Semantics
-[PASS] Div/Zero & Inf Inputs
-[PASS] Int Conv Edges
-[PASS] Exponent Saturation
-[PASS] Math Symmetries
-[PASS] Lerp Edges
-[PASS] Expr Negation
-[PASS] Constexpr Complex
-[PASS] Shift Edges
-[PASS] Comparison Logic
-[PASS] Corner Cases & Bit Patterns
-[PASS] atan2
-  atan2 worst case error: 0.00 degree
-[PASS] atan2 (v2)
-[PASS] exp
-[PASS] hypot
-[PASS] tan
-[PASS] asin/acos
-[PASS] log/log2/log10
-[PASS] pow
-[PASS] rounding
-[PASS] hyperbolic
-[PASS] copysign/fmod
-[PASS] Random Stress Test
+=== FUNCTIONAL TESTS ===</br>
+[PASS] Default Constructor</br>
+[PASS] Integer Constructor</br>
+[PASS] Float Constructor</br>
+[PASS] Constants</br>
+[PASS] Addition</br>
+[PASS] Subtraction</br>
+[PASS] Multiplication</br>
+[PASS] Division</br>
+[PASS] Negation</br>
+[PASS] Absolute Value</br>
+[PASS] Comparison</br>
+[PASS] Shift Operators</br>
+[PASS] Fused Multiply-Add</br>
+[PASS] Fused Multiply-Sub</br>
+[PASS] Fused Multiply-Multiply-Add</br>
+[PASS] Square Root</br>
+[PASS] Inverse Square Root</br>
+[PASS] Sine</br>
+[PASS] Cosine</br>
+[PASS] Linear Interpolation</br>
+[PASS] Min/Max</br>
+[PASS] Clamp</br>
+[PASS] Integer Conversion</br>
+[PASS] Chained Operations</br>
+[PASS] Overflow Handling</br>
+[PASS] Underflow Handling</br>
+[PASS] Edge Cases</br>
+[PASS] Compound Assignment</br>
+[PASS] Expression Templates</br>
+[PASS] Fused Multiply-Sub (ext)</br>
+[PASS] Fused Mul-Mul-Sub (ext)</br>
+[PASS] Invariant Normalization</br>
+[PASS] Zero Semantics</br>
+[PASS] Div/Zero & Inf Inputs</br>
+[PASS] Int Conv Edges</br>
+[PASS] Exponent Saturation</br>
+[PASS] Math Symmetries</br>
+[PASS] Lerp Edges</br>
+[PASS] Expr Negation</br>
+[PASS] Constexpr Complex</br>
+[PASS] Shift Edges</br>
+[PASS] Comparison Logic</br>
+[PASS] Corner Cases & Bit Patterns</br>
+[PASS] atan2</br>
+  atan2 worst case error: 0.00 degree</br>
+[PASS] atan2 (v2)</br>
+[PASS] exp</br>
+[PASS] hypot</br>
+[PASS] tan</br>
+[PASS] asin/acos</br>
+[PASS] log/log2/log10</br>
+[PASS] pow</br>
+[PASS] rounding</br>
+[PASS] hyperbolic</br>
+[PASS] copysign/fmod</br>
+[PASS] Random Stress Test</br>
 
 -----------------------------------------------------------
 Results: 55/55 passed, 0 failed
@@ -193,7 +190,7 @@ Results: 55/55 passed, 0 failed
 ALL TESTS PASSED
 
 
-##### Results for our SoftFloat implementation
+### Results for our SoftFloat implementation
 
 LINPACK benchmark, SoftFloat precision.
 Machine precision:  6 digits.
@@ -229,7 +226,7 @@ Use 361  passes (x 100)
 |-------------------|----------------------|--------|--------|--------|
 | MWIPS             |                      | 78.159 |        | 46.188 |
 
-##### Results for hardware float implementation
+### Results for hardware float implementation
 
 LINPACK benchmark, Single precision.
 Machine precision:  6 digits.
@@ -266,7 +263,7 @@ Use 1889  passes (x 100)
 |-------------------|----------------------|--------|--------|--------|
 | MWIPS             |                      | 386.563|        |  48.866|
 
-##### Conclusion
+### Conclusion
 
 Our software floating point is 386.563 / 78.159 = 4.95 times slower than hardware floating point on the Whetstone benchmark and 28912.311 / 3561.228 = 8.11 times slower in the Linpack benchmark.
 
