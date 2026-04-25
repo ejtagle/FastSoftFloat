@@ -142,50 +142,50 @@ Results: 55/55 passed, 0 failed
 === BENCHMARKS ===
 | Operation |             : |    timing     |
 |-----------|:-------------:|--------------:|
-| Multiply  | (100000 ops): |  184.58 ns/op |
-| Add       | (100000 ops): |  250.75 ns/op |
-| Subtract  | (100000 ops): |  375.10 ns/op |
+| Multiply  | (100000 ops): |  179.07 ns/op |
+| Add       | (100000 ops): |  250.08 ns/op |
+| Subtract  | (100000 ops): |  381.05 ns/op |
 | Divide    | (100000 ops): |  309.61 ns/op |
-| FMA       | (100000 ops): |  809.71 ns/op |
-| FMS       | (100000 ops): |  732.31 ns/op |
-| FMMA      | (100000 ops): | 1000.22 ns/op |
-| FMMS      | (100000 ops): | 1101.43 ns/op |
-| sin       | (100000 ops): |  922.83 ns/op |
-| cos       | (100000 ops): |  928.79 ns/op |
-| tan       | (100000 ops): | 1274.19 ns/op |
-| asin      | (100000 ops): | 2125.81 ns/op |
-| acos      | (100000 ops): | 2063.13 ns/op |
-| atan2     | (100000 ops): | 1274.08 ns/op |
+| FMA       | (100000 ops): |  797.80 ns/op |
+| FMS       | (100000 ops): |  738.27 ns/op |
+| FMMA      | (100000 ops): |  994.27 ns/op |
+| FMMS      | (100000 ops): | 1107.38 ns/op |
+| sin       | (100000 ops): |  940.68 ns/op |
+| cos       | (100000 ops): |  940.68 ns/op |
+| tan       | (100000 ops): | 1280.41 ns/op |
+| asin      | (100000 ops): | 2145.53 ns/op |
+| acos      | (100000 ops): | 2072.24 ns/op |
+| atan2     | (100000 ops): | 1583.67 ns/op |
 | sinh      | (100000 ops): | 1452.69 ns/op |
-| cosh      | (100000 ops): | 1452.69 ns/op |
-| tanh      | (100000 ops): | 1732.51 ns/op |
+| cosh      | (100000 ops): | 1446.74 ns/op |
+| tanh      | (100000 ops): | 1744.42 ns/op |
 | exp       | (100000 ops): |  726.36 ns/op |
 | log       | (100000 ops): |  625.14 ns/op |
 | log2      | (100000 ops): |  547.75 ns/op |
-| log10     | (100000 ops): |  631.10 ns/op |
-| pow       | (100000 ops): |  708.49 ns/op |
+| log10     | (100000 ops): |  625.15 ns/op |
+| pow       | (100000 ops): |  696.59 ns/op |
 | sqrt      | (100000 ops): |  184.59 ns/op |
 | inv_sqrt  | (100000 ops): |  214.35 ns/op |
-| floor     | (100000 ops): |  303.66 ns/op |
-| ceil      | (100000 ops): |  565.61 ns/op |
-| trunc     | (100000 ops): |  321.52 ns/op |
-| round     | (100000 ops): |  333.42 ns/op |
-| fract     | (100000 ops): |  672.77 ns/op |
-| modf      | (100000 ops): |  720.40 ns/op |
+| floor     | (100000 ops): |  291.75 ns/op |
+| ceil      | (100000 ops): |  352.14 ns/op |
+| trunc     | (100000 ops): |  303.66 ns/op |
+| round     | (100000 ops): |  357.24 ns/op |
+| fract     | (100000 ops): |  679.66 ns/op |
+| modf      | (100000 ops): |  714.45 ns/op |
 | abs       | (100000 ops): |   59.56 ns/op |
 | copysign  | (100000 ops): |   59.56 ns/op |
-| fmod      | (100000 ops): |  672.77 ns/op |
-| hypot     | (100000 ops): |  476.75 ns/op |
+| fmod      | (100000 ops): |  720.40 ns/op |
+| hypot     | (100000 ops): |  482.26 ns/op |
 | lerp      | (100000 ops): |  970.45 ns/op |
-| compare < | (100000 ops): |  107.19 ns/op |
+| compare < | (100000 ops): |  101.24 ns/op |
 | compare = | (100000 ops): |   23.84 ns/op |
-| shift <<  | (100000 ops): |   77.42 ns/op |
-| shift >>  | (100000 ops): |   71.47 ns/op |
+| shift <<  | (100000 ops): |   71.47 ns/op |
+| shift >>  | (100000 ops): |   83.37 ns/op |
 | to_float  | (100000 ops): |   59.56 ns/op |
-| to_int32  | (100000 ops): |  101.23 ns/op |
+| to_int32  | (100000 ops): |  113.14 ns/op |
 | from_floa | (100000 ops): |   23.84 ns/op |
 | from_int  | (100000 ops): |  196.49 ns/op |
-| Dot4      | (100000 ops): | 2643.95 ns/op |
+| Dot4      | (100000 ops): | 2685.41 ns/op |
 
 ALL TESTS PASSED
 
@@ -199,32 +199,32 @@ Average rolled and unrolled performance:
 
 | Reps | Time(s) | DGEFA  | DGESL | OVERHEAD | KFLOPS   |
 |------|---------|--------|-------|----------|----------|
-| 16   | 0.88    | 85.08% | 5.18% | 9.74%    | 3561.242 |
-| 32   | 1.76    | 85.08% | 5.18% | 9.74%    | 3561.244 |
-| 64   | 3.52    | 85.08% | 5.18% | 9.74%    | 3561.239 |
-| 128  | 7.04    | 85.08% | 5.18% | 9.74%    | 3561.228 |
+| 16   | 0.86    | 84.81% | 5.16% | 10.03%   | 3640.305 |
+| 32   | 1.73    | 84.81% | 5.16% | 10.03%   | 3640.292 |
+| 64   | 3.45    | 84.81% | 5.16% | 10.03%   | 3640.298 |
+| 128  | 6.90    | 84.81% | 5.16% | 10.03%   | 3640.292 |
 
 Calibrate
 | 0.28 Seconds |  1 | Passes (x 100) |
-| 1.38 Seconds |  5 | Passes (x 100) |
-| 6.92 Seconds | 25 | Passes (x 100) |
+| 1.39 Seconds |  5 | Passes (x 100) |
+| 6.96 Seconds | 25 | Passes (x 100) |
 
-Use 361  passes (x 100)
+Use 359  passes (x 100)
 
           SoftFloat Precision C/C++ Whetstone Benchmark
 
 | Loop content      |         Result       | MFLOPS |  MOPS  | Seconds|
 |-------------------|----------------------|--------|--------|--------|
-| N1 floating point | -1.12444269657135010 | 39.048 |        |  0.178 |
-| N2 floating point | -1.12243998050689697 |  2.567 |        | 18.898 |
-| N3 if then else   |  1.00000000000000000 |        | 83.981 |  0.445 |
-| N4 fixed point    | 12.00000000000000000 |        | 83.975 |  1.354 |
-| N5 sin,cos etc.   |  0.49188536405563354 |        |  1.800 | 16.687 |
-| N6 floating point |  0.99991601705551147 | 75.377 |        |  2.583 |
-| N7 assignments    |  3.00000000000000000 |        | 71.985 |  0.927 |
-| N8 exp,sqrt etc.  |  0.75000041723251343 |        |  2.624 |  5.117 |
+| N1 floating point | -1.12444269657135010 |  2.723 |        |  2.532 |
+| N2 floating point | -1.12243998050689697 |  2.518 |        | 19.161 |
+| N3 if then else   |  1.00000000000000000 |        | 83.981 |  0.442 |
+| N4 fixed point    | 12.00000000000000000 |        | 78.727 |  1.436 |
+| N5 sin,cos etc.   |  0.49188536405563354 |        |  1.791 | 16.679 |
+| N6 floating point |  0.99991601705551147 | 78.147 |        |  2.478 |
+| N7 assignments    |  3.00000000000000000 |        | 71.985 |  0.922 |
+| N8 exp,sqrt etc.  |  0.75000041723251343 |        |  2.594 |  5.148 |
 |-------------------|----------------------|--------|--------|--------|
-| MWIPS             |                      | 78.159 |        | 46.188 |
+| MWIPS             |                      | 73.568 |        | 48.799 |
 
 ### Results for hardware float implementation
 
@@ -265,5 +265,5 @@ Use 1889  passes (x 100)
 
 ### Conclusion
 
-Our software floating point is 386.563 / 78.159 = 4.95 times slower than hardware floating point on the Whetstone benchmark and 28912.311 / 3561.228 = 8.11 times slower in the Linpack benchmark.
+Our software floating point is 386.563 / 73.568 = 5.25 times slower than hardware floating point on the Whetstone benchmark and 28912.311 / 3640.292 = 7.94 times slower in the Linpack benchmark.
 
