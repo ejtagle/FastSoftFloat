@@ -1419,14 +1419,24 @@ constexpr SF_INLINE void SoftFloat::normalise_fast(int32_t& m, int32_t& e) noexc
 // Fused arithmetic — constexpr (implicitly inline since constexpr)
 // =========================================================================
 
-[[nodiscard]] constexpr SF_HOT SoftFloat fused_mul_add(SoftFloat a, SoftFloat b, SoftFloat c) noexcept
-{
+[[nodiscard]] constexpr SF_HOT SoftFloat fused_mul_add(SoftFloat a, SoftFloat b, SoftFloat c) noexcept {
 	if (UNLIKELY(!b.mantissa || !c.mantissa)) return a;
 	if (UNLIKELY(!a.mantissa)) return SoftFloat::mul_plain(b, c);
 
-	int64_t  prod = static_cast<int64_t>(b.mantissa) * static_cast<int64_t>(c.mantissa);
-	int32_t  pm   = static_cast<int32_t>(prod >> 29);
-	int32_t  pe   = b.exponent + c.exponent + 29;
+	int32_t pm, pe;
+	if (SF_IS_CONSTEVAL()) {
+		int64_t prod = static_cast<int64_t>(b.mantissa) * static_cast<int64_t>(c.mantissa);
+		pm = static_cast<int32_t>(prod >> 29);
+		pe = b.exponent + c.exponent + 29;
+	}
+	else {
+		int32_t lo, hi;
+		__asm__("smull %0, %1, %2, %3"
+			: "=&r"(lo), "=&r"(hi)
+			: "r"(b.mantissa), "r"(c.mantissa));
+		pm = (hi << 3) | (static_cast<uint32_t>(lo) >> 29);
+		pe = b.exponent + c.exponent + 29;
+	}
 
 	uint32_t norm = static_cast<uint32_t>(pm ^ (pm >> 31)) >> 30;
 	pm >>= norm;
@@ -1434,72 +1444,69 @@ constexpr SF_INLINE void SoftFloat::normalise_fast(int32_t& m, int32_t& e) noexc
 
 	int d = a.exponent - pe;
 	if (d >= 31) return a;
-
 	if (d <= -31) {
-		if (UNLIKELY(pe > SoftFloat::EXP_MAX))  return SoftFloat::from_raw_unchecked(pm >= 0 ? SoftFloat::MANT_MIN : -static_cast<int32_t>(SoftFloat::MANT_MIN), SoftFloat::EXP_MAX);
-		if (UNLIKELY(pe < SoftFloat::EXP_MIN)) return SoftFloat::zero();
+		if (UNLIKELY(pe > SoftFloat::EXP_MAX))
+			return SoftFloat::from_raw_unchecked(pm >= 0 ? SoftFloat::MANT_MIN : -static_cast<int32_t>(SoftFloat::MANT_MIN), SoftFloat::EXP_MAX);
+		if (UNLIKELY(pe < SoftFloat::EXP_MIN))
+			return SoftFloat::zero();
 		return SoftFloat::from_raw_unchecked(pm, pe);
 	}
 
 	int32_t am = a.mantissa;
-
-	if (d == 0) {
-		return SoftFloat::finish_addsub(am + pm, pe);
-	}
-
+	if (d == 0) return SoftFloat::finish_addsub(am + pm, pe);
 	if (d > 0) {
 		pm >>= d;
 		return SoftFloat::finish_addsub(am + pm, a.exponent);
 	}
-
 	am >>= -d;
 	return SoftFloat::finish_addsub(am + pm, SoftFloat::sat_exp(pe));
 }
 
-[[nodiscard]] constexpr SF_HOT SoftFloat fused_mul_sub(SoftFloat a, SoftFloat b, SoftFloat c) noexcept
-{
+[[nodiscard]] constexpr SF_HOT SoftFloat fused_mul_sub(SoftFloat a, SoftFloat b, SoftFloat c) noexcept {
 	if (UNLIKELY(!b.mantissa || !c.mantissa)) return a;
 	if (UNLIKELY(!a.mantissa)) return -SoftFloat::mul_plain(b, c);
 
-	int64_t  prod = static_cast<int64_t>(b.mantissa) * static_cast<int64_t>(c.mantissa);
-	int32_t  pm   = static_cast<int32_t>(prod >> 29);
-	int32_t  pe   = b.exponent + c.exponent + 29;
+	int32_t pm, pe;
+	if (SF_IS_CONSTEVAL()) {
+		int64_t prod = static_cast<int64_t>(b.mantissa) * static_cast<int64_t>(c.mantissa);
+		pm = static_cast<int32_t>(prod >> 29);
+		pe = b.exponent + c.exponent + 29;
+	}
+	else {
+		int32_t lo, hi;
+		__asm__("smull %0, %1, %2, %3"
+			: "=&r"(lo), "=&r"(hi)
+			: "r"(b.mantissa), "r"(c.mantissa));
+		pm = (hi << 3) | (static_cast<uint32_t>(lo) >> 29);
+		pe = b.exponent + c.exponent + 29;
+	}
 
 	uint32_t norm = static_cast<uint32_t>(pm ^ (pm >> 31)) >> 30;
 	pm >>= norm;
 	pe += static_cast<int32_t>(norm);
-
 	pm = -pm;
 
 	int d = a.exponent - pe;
 	if (d >= 31) return a;
-
 	if (d <= -31) {
-		if (UNLIKELY(pe > SoftFloat::EXP_MAX))  return SoftFloat::from_raw_unchecked(pm >= 0 ? SoftFloat::MANT_MIN : -static_cast<int32_t>(SoftFloat::MANT_MIN), SoftFloat::EXP_MAX);
-		if (UNLIKELY(pe < SoftFloat::EXP_MIN)) return SoftFloat::zero();
+		if (UNLIKELY(pe > SoftFloat::EXP_MAX))
+			return SoftFloat::from_raw_unchecked(pm >= 0 ? SoftFloat::MANT_MIN : -static_cast<int32_t>(SoftFloat::MANT_MIN), SoftFloat::EXP_MAX);
+		if (UNLIKELY(pe < SoftFloat::EXP_MIN))
+			return SoftFloat::zero();
 		return SoftFloat::from_raw_unchecked(pm, pe);
 	}
 
 	int32_t am = a.mantissa;
-
-	if (d == 0) {
-		return SoftFloat::finish_addsub(am + pm, pe);
-	}
-
+	if (d == 0) return SoftFloat::finish_addsub(am + pm, pe);
 	if (d > 0) {
 		pm >>= d;
 		return SoftFloat::finish_addsub(am + pm, a.exponent);
 	}
-
 	am >>= -d;
 	return SoftFloat::finish_addsub(am + pm, SoftFloat::sat_exp(pe));
 }
 
-[[nodiscard]] constexpr SF_HOT SoftFloat fused_mul_mul_add(SoftFloat a,
-	SoftFloat b,
-	SoftFloat c,
-	SoftFloat d) noexcept
-{
+[[nodiscard]] constexpr SF_HOT SoftFloat fused_mul_mul_add(SoftFloat a, SoftFloat b, SoftFloat c, SoftFloat d) noexcept {
 	bool abz = (!a.mantissa || !b.mantissa);
 	bool cdz = (!c.mantissa || !d.mantissa);
 	if (UNLIKELY(abz || cdz)) {
@@ -1508,22 +1515,37 @@ constexpr SF_INLINE void SoftFloat::normalise_fast(int32_t& m, int32_t& e) noexc
 		return SoftFloat::mul_plain(a, b);
 	}
 
-	int64_t p1 = static_cast<int64_t>(a.mantissa) * static_cast<int64_t>(b.mantissa);
-	int32_t pm1 = static_cast<int32_t>(p1 >> 29);
-	int32_t pe1 = a.exponent + b.exponent + 29;
+	int32_t pm1, pe1, pm2, pe2;
+	if (SF_IS_CONSTEVAL()) {
+		int64_t p1 = static_cast<int64_t>(a.mantissa) * static_cast<int64_t>(b.mantissa);
+		pm1 = static_cast<int32_t>(p1 >> 29);
+		pe1 = a.exponent + b.exponent + 29;
+		int64_t p2 = static_cast<int64_t>(c.mantissa) * static_cast<int64_t>(d.mantissa);
+		pm2 = static_cast<int32_t>(p2 >> 29);
+		pe2 = c.exponent + d.exponent + 29;
+	}
+	else {
+		int32_t lo1, hi1;
+		__asm__("smull %0, %1, %2, %3"
+			: "=&r"(lo1), "=&r"(hi1)
+			: "r"(a.mantissa), "r"(b.mantissa));
+		pm1 = (hi1 << 3) | (static_cast<uint32_t>(lo1) >> 29);
+		pe1 = a.exponent + b.exponent + 29;
 
-	int64_t p2 = static_cast<int64_t>(c.mantissa) * static_cast<int64_t>(d.mantissa);
-	int32_t pm2 = static_cast<int32_t>(p2 >> 29);
-	int32_t pe2 = c.exponent + d.exponent + 29;
+		int32_t lo2, hi2;
+		__asm__("smull %0, %1, %2, %3"
+			: "=&r"(lo2), "=&r"(hi2)
+			: "r"(c.mantissa), "r"(d.mantissa));
+		pm2 = (hi2 << 3) | (static_cast<uint32_t>(lo2) >> 29);
+		pe2 = c.exponent + d.exponent + 29;
+	}
 
 	uint32_t n1 = static_cast<uint32_t>(pm1 ^ (pm1 >> 31)) >> 30;
-	pm1 >>= n1; pe1 += static_cast<int32_t>(n1);
-
+	pm1 >>= n1; pe1 += n1;
 	uint32_t n2 = static_cast<uint32_t>(pm2 ^ (pm2 >> 31)) >> 30;
-	pm2 >>= n2; pe2 += static_cast<int32_t>(n2);
+	pm2 >>= n2; pe2 += n2;
 
 	int d_exp = pe1 - pe2;
-
 	if (d_exp >= 31) {
 		if (UNLIKELY(pe1 > SoftFloat::EXP_MAX)) return SoftFloat::from_raw_unchecked(pm1 >= 0 ? SoftFloat::MANT_MIN : -static_cast<int32_t>(SoftFloat::MANT_MIN), SoftFloat::EXP_MAX);
 		if (UNLIKELY(pe1 < SoftFloat::EXP_MIN)) return SoftFloat::zero();
@@ -1535,28 +1557,18 @@ constexpr SF_INLINE void SoftFloat::normalise_fast(int32_t& m, int32_t& e) noexc
 		return SoftFloat::from_raw_unchecked(pm2, pe2);
 	}
 
-	if (d_exp == 0) {
-		return SoftFloat::finish_addsub(pm1 + pm2, pe1);
-	}
+	if (d_exp == 0) return SoftFloat::finish_addsub(pm1 + pm2, pe1);
 
 	int32_t exp;
-	if (d_exp > 0) {
-		pm2 >>= d_exp;
-		exp = pe1;
-	}
-	else {
-		pm1 >>= -d_exp;
-		exp = pe2;
-	}
+	if (d_exp > 0) { pm2 >>= d_exp; exp = pe1; }
+	else { pm1 >>= -d_exp; exp = pe2; }
 
 	if (UNLIKELY(exp > SoftFloat::EXP_MAX || exp < SoftFloat::EXP_MIN)) {
 		int32_t s = pm1 + pm2;
 		if (UNLIKELY(s == 0)) return SoftFloat::zero();
-		int32_t re = exp;
-		SoftFloat::normalise_fast(s, re);
-		return SoftFloat::from_raw_unchecked(s, re);
+		SoftFloat::normalise_fast(s, exp);
+		return SoftFloat::from_raw_unchecked(s, exp);
 	}
-
 	return SoftFloat::finish_addsub(pm1 + pm2, exp);
 }
 

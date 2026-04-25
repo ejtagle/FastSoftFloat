@@ -284,8 +284,8 @@
 
 /*PRECISION PRECISION PRECISION PRECISION PRECISION PRECISION PRECISION*/
 
-/* #define SF */
-#define SP
+#define SF
+/* #define SP */
 /* #define DP */
  
 #ifdef DP 

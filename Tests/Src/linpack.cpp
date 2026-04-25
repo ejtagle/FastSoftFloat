@@ -29,8 +29,8 @@
 #include <float.h>
 #include "FusedSoftFloat.hh"
 
-/* #define SF */
-#define SP
+#define SF
+/* #define SP */
 /* #define DP */
 
 #ifdef SF
