@@ -1905,21 +1905,27 @@ constexpr SF_HOT SinCosPair SoftFloat::sincos() const noexcept
 	return { from_q30(sin_q30), from_q30(cos_q30) };
 }
 
-constexpr SF_HOT SoftFloat SoftFloat::tan() const noexcept
-{
+constexpr SF_HOT SoftFloat SoftFloat::tan() const noexcept {
 	if (UNLIKELY(mantissa == 0)) return zero();
 
-	auto[s, c] = sincos();
-
-	if (UNLIKELY(c.mantissa == 0)) {
+	auto [s, c] = sincos();
+	if (UNLIKELY(c.mantissa == 0))
 		return from_raw_unchecked(s.mantissa >= 0 ? MANT_MIN : -static_cast<int32_t>(MANT_MIN), EXP_MAX);
-	}
 
 	SoftFloat c_inv = c.reciprocal();
 
-	int32_t re = s.exponent + c_inv.exponent + 29;
-	int64_t prod = static_cast<int64_t>(s.mantissa) * static_cast<int64_t>(c_inv.mantissa);
-	int32_t rm = static_cast<int32_t>(prod >> 29);
+	int32_t rm, re = s.exponent + c_inv.exponent + 29;
+	if (SF_IS_CONSTEVAL()) {
+		int64_t prod = static_cast<int64_t>(s.mantissa) * static_cast<int64_t>(c_inv.mantissa);
+		rm = static_cast<int32_t>(prod >> 29);
+	}
+	else {
+		int32_t lo, hi;
+		__asm__("smull %0, %1, %2, %3"
+			: "=&r"(lo), "=&r"(hi)
+			: "r"(s.mantissa), "r"(c_inv.mantissa));
+		rm = (hi << 3) | (static_cast<uint32_t>(lo) >> 29);
+	}
 	uint32_t abs_m = abs32(rm);
 	if (UNLIKELY(abs_m >= MANT_OVERFLOW)) {
 		rm >>= 1;
