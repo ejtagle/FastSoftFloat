@@ -2286,8 +2286,20 @@ constexpr SF_HOT SoftFloat atan2(SoftFloat y, SoftFloat x) noexcept
 	int32_t a1 = ATAN_TAB_Q29[idx + 1];
 
 	int64_t delta = static_cast<int64_t>(a1) - static_cast<int64_t>(a0);
-	int64_t prod = delta * static_cast<int64_t>(frac);
-	int32_t angle_q29 = a0 + static_cast<int32_t>(prod >> 16);
+	int32_t angle_q29;
+	if (SF_IS_CONSTEVAL()) {
+		int64_t prod = delta * static_cast<int64_t>(frac);
+		angle_q29 = a0 + static_cast<int32_t>(prod >> 16);
+	}
+	else {
+		int32_t lo, hi;
+		// Note: delta is int64_t, but we know it fits in 32 bits so we can use SMULL
+		int32_t delta32 = static_cast<int32_t>(delta);
+		__asm__("smull %0, %1, %2, %3"
+			: "=&r"(lo), "=&r"(hi)
+			: "r"(delta32), "r"(static_cast<int32_t>(frac)));
+		angle_q29 = a0 + ((hi << 16) | (static_cast<uint32_t>(lo) >> 16));
+	}
 
 	constexpr int32_t HALF_PI_Q29 = 843314857;
 	constexpr int32_t PI_Q29 = 1686629713;
