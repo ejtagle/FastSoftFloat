@@ -2711,28 +2711,32 @@ constexpr SF_HOT SoftFloat SoftFloat::floor() const noexcept {
 }
 
 constexpr SoftFloat SoftFloat::ceil() const noexcept {
-	if (mantissa == 0 || exponent >= 0) return *this;
+	if (UNLIKELY(mantissa == 0)) return *this;
+	if (exponent >= 0) return *this;
 
-	int rs = -exponent;
-	if (rs >= 30) {
-		return is_positive() ? SoftFloat::one() : SoftFloat::zero();
+	int32_t rs = -exponent;
+	if (rs >= 30) {                 // all fractional
+		return is_positive() ? one() : zero();
 	}
+
 	uint32_t a = abs32(mantissa);
 	uint32_t frac_mask = (1u << rs) - 1u;
 	bool has_frac = (a & frac_mask) != 0;
+	uint32_t int_part = a & ~frac_mask;
 
-	int32_t trunc_m = static_cast<int32_t>(a & ~frac_mask);
-	int32_t trunc_e = exponent;
-	if (trunc_m == 0) {
-		return is_positive() && has_frac ? SoftFloat::one() : SoftFloat::zero();
+	if (mantissa < 0) {
+		return SoftFloat(-static_cast<int32_t>(int_part), exponent);
 	}
-
-	SoftFloat fi = from_raw_unchecked(is_negative() ? -trunc_m : trunc_m, trunc_e);
-
-	if (is_positive() && has_frac) {
-		return fi + SoftFloat::one();
+	else {
+		uint32_t new_m = int_part;
+		if (has_frac) new_m += (1u << rs);   // increase integer part by 1
+		if (new_m >= MANT_OVERFLOW) {
+			// rare, but handle overflow: e.g., int_part == 0x3FFFFFFF and has_frac
+			// then new_m = 0x40000000 → unnormalised; the SoftFloat constructor will normalise.
+			return SoftFloat(static_cast<int32_t>(new_m), exponent);
+		}
+		return SoftFloat(static_cast<int32_t>(new_m), exponent);
 	}
-	return fi;
 }
 
 constexpr SF_HOT SoftFloat SoftFloat::round() const noexcept {
@@ -2775,11 +2779,12 @@ constexpr SoftFloat SoftFloat::fmod(SoftFloat y) const noexcept {
 	int32_t  sx = (mantissa < 0) ? -1 : 1;
 	uint32_t ax = abs32(mantissa);
 	uint32_t ay = abs32(y.mantissa);
-	int32_t  d  = exponent - y.exponent;
+	int32_t  d = exponent - y.exponent;
 
 	if (d < 0) return *this;
 	if (d == 0 && ax < ay) return *this;
 
+	// Fast path for d == 0
 	if (d == 0) {
 		uint32_t r = ax - ay;
 		if (r == 0) return zero();
@@ -2789,70 +2794,75 @@ constexpr SoftFloat SoftFloat::fmod(SoftFloat y) const noexcept {
 		return from_raw_unchecked(sx * rm, re);
 	}
 
-	if (SF_IS_CONSTEVAL()) {
-		uint64_t r64 = ax;
-		int32_t  rem = d;
-		while (rem > 0) {
-			int shift = (rem > 30) ? 30 : rem;
-			r64 = (r64 << shift) % ay;
-			rem -= shift;
+	// Compute r = (ax * 2^d) % ay using binary exponentiation of 2^d mod ay
+	uint32_t ax_mod = ax % ay;
+	if (ax_mod == 0) return zero();
+
+	// Compute 2^d mod ay
+	uint32_t pow2_mod = 1;
+	uint32_t base = 2 % ay;
+	uint32_t remaining = static_cast<uint32_t>(d);
+	while (remaining) {
+		if (remaining & 1) {
+			// pow2_mod = (pow2_mod * base) % ay
+			uint64_t prod = static_cast<uint64_t>(pow2_mod) * base;
+			uint32_t q, rem;
+			if !consteval {
+				__asm__("umull %0, %1, %2, %3"
+					: "=&r"(rem), "=&r"(q)   // lo = rem, hi = q
+					: "r"(pow2_mod), "r"(base));
+				// remainder = (q*2^32 + rem) % ay → need two UDIVs
+				uint32_t r_hi = q / ay;
+				uint32_t r_lo_part = q - r_hi * ay;
+				uint64_t combined = (static_cast<uint64_t>(r_lo_part) << 32) | rem;
+				pow2_mod = static_cast<uint32_t>(combined % ay);
+			}
+			else {
+				pow2_mod = static_cast<uint32_t>(prod % ay);
+			}
 		}
-		uint32_t r = static_cast<uint32_t>(r64);
-		if (r == 0) return zero();
-		int32_t rm = static_cast<int32_t>(r);
-		int32_t re = y.exponent;
-		normalise_fast(rm, re);
-		return from_raw_unchecked(sx * rm, re);
+		// base = (base * base) % ay
+		{
+			uint64_t sq = static_cast<uint64_t>(base) * base;
+			if !consteval {
+				uint32_t sq_lo, sq_hi;
+				__asm__("umull %0, %1, %2, %3"
+					: "=&r"(sq_lo), "=&r"(sq_hi)
+					: "r"(base), "r"(base));
+				uint32_t r_hi = sq_hi / ay;
+				uint32_t r_lo_part = sq_hi - r_hi * ay;
+				uint64_t combined = (static_cast<uint64_t>(r_lo_part) << 32) | sq_lo;
+				base = static_cast<uint32_t>(combined % ay);
+			}
+			else {
+				base = static_cast<uint32_t>(sq % ay);
+			}
+		}
+		remaining >>= 1;
 	}
 
-#if defined(__arm__)
-	{
-		uint32_t r   = ax;
-		int32_t  rem = d;
-
-		while (rem > 1) {
-			uint32_t num = r << 2;
-			uint32_t q;
-			__asm__(
-				"udiv %0, %1, %2"
-				: "=r"(q)
-				: "r"(num), "r"(ay));
-			r = num - q * ay;
-			rem -= 2;
-		}
-		if (rem == 1) {
-			uint32_t num = r << 1;
-			uint32_t q;
-			__asm__(
-				"udiv %0, %1, %2"
-				: "=r"(q)
-				: "r"(num), "r"(ay));
-			r = num - q * ay;
-		}
-
-		if (r == 0) return zero();
-		int32_t rm = static_cast<int32_t>(r);
-		int32_t re = y.exponent;
-		normalise_fast(rm, re);
-		return from_raw_unchecked(sx * rm, re);
+	// Final result = (ax_mod * pow2_mod) % ay
+	uint64_t final_prod = static_cast<uint64_t>(ax_mod) * pow2_mod;
+	uint32_t r;
+	if !consteval {
+		uint32_t lo, hi;
+		__asm__("umull %0, %1, %2, %3"
+			: "=&r"(lo), "=&r"(hi)
+			: "r"(ax_mod), "r"(pow2_mod));
+		uint32_t r_hi = hi / ay;
+		uint32_t r_lo_part = hi - r_hi * ay;
+		uint64_t combined = (static_cast<uint64_t>(r_lo_part) << 32) | lo;
+		r = static_cast<uint32_t>(combined % ay);
 	}
-#else
-	{
-		uint64_t r64 = ax;
-		int32_t  rem = d;
-		while (rem > 0) {
-			int shift = (rem > 30) ? 30 : rem;
-			r64 = (r64 << shift) % ay;
-			rem -= shift;
-		}
-		uint32_t r = static_cast<uint32_t>(r64);
-		if (r == 0) return zero();
-		int32_t rm = static_cast<int32_t>(r);
-		int32_t re = y.exponent;
-		normalise_fast(rm, re);
-		return from_raw_unchecked(sx * rm, re);
+	else {
+		r = static_cast<uint32_t>(final_prod % ay);
 	}
-#endif
+
+	if (r == 0) return zero();
+	int32_t rm = static_cast<int32_t>(r);
+	int32_t re = y.exponent;
+	normalise_fast(rm, re);
+	return from_raw_unchecked(sx * rm, re);
 }
 
 constexpr SoftFloat SoftFloat::fma(SoftFloat b, SoftFloat c) const noexcept {
