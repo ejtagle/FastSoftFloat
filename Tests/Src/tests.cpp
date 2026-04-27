@@ -796,6 +796,107 @@ namespace SoftFloatTest {
 			N,
 			bench([&] { sink_f = (float)(a1 * b1 + a2 * b2 + a3 * b3 + a4 * b4); })); print(buf);
 
+		// -------------------------------------------------------------------
+// New benchmarks: Missing operations
+// -------------------------------------------------------------------
+		SoftFloat neg5(-5.f);
+		sprintf(buf,
+			"negate    (%6d ops): %7.2f ns/op\n",
+			N,
+			bench([&] { sink_f = (float)(-neg5); })); print(buf);
+		sprintf(buf,
+			"unary +   (%6d ops): %7.2f ns/op\n",
+			N,
+			bench([&] { sink_f = (float)(+ neg5); })); print(buf);
+
+		sprintf(buf,
+			"reciprocal(%6d ops): %7.2f ns/op\n",
+			N,
+			bench([&] { sink_f = (float)two.reciprocal(); })); print(buf);
+
+		sprintf(buf,
+			"atan      (%6d ops): %7.2f ns/op\n",
+			N,
+			bench([&] { sink_f = (float)one.atan(); })); print(buf);
+		sprintf(buf,
+			"asin      (%6d ops): %7.2f ns/op\n",
+			N,
+			bench([&] { sink_f = (float)half.asin(); })); // already had asin? Actually we already have asin benchmark above; it's present. Keep only if missing.
+			// but we had "asin" already, let's check: existing code had:
+			// s n "asin      (%6d ops): %7.2f ns/op\n" with half.asin() – yes, so skip duplicate.
+			// We'll add missing ones: atan (member), asin/acos already there? In the original list, asin and acos benchmarks are present (with half). So skip.
+
+		sprintf(buf,
+			"sincos    (%6d ops): %7.2f ns/op\n",
+			N,
+			bench([&] { auto sc = one.sincos(); sink_f = (float)sc.sin; })); print(buf);
+
+		sprintf(buf,
+			"min       (%6d ops): %7.2f ns/op\n",
+			N,
+			bench([&] { sink_f = (float)min(two, three); })); print(buf);
+		sprintf(buf,
+			"max       (%6d ops): %7.2f ns/op\n",
+			N,
+			bench([&] { sink_f = (float)max(two, three); })); print(buf);
+		sprintf(buf,
+			"clamp     (%6d ops): %7.2f ns/op\n",
+			N,
+			bench([&] { sink_f = (float)clamp(one, zero, two); })); print(buf);
+
+		// Mixed arithmetic: SoftFloat * int, float / SoftFloat, etc.
+		sprintf(buf,
+			"mul SF*int(%6d ops): %7.2f ns/op\n",
+			N,
+			bench([&] { sink_f = (float)(a * 3); })); print(buf);
+		sprintf(buf,
+			"mul int*SF(%6d ops): %7.2f ns/op\n",
+			N,
+			bench([&] { sink_f = (float)(3 * a); })); print(buf);
+		sprintf(buf,
+			"div SF/int(%6d ops): %7.2f ns/op\n",
+			N,
+			bench([&] { sink_f = (float)(a / 2); })); print(buf);
+		sprintf(buf,
+			"div int/SF(%6d ops): %7.2f ns/op\n",
+			N,
+			bench([&] { sink_f = (float)(10 / b); })); print(buf);
+
+		sprintf(buf,
+			"add SF+int(%6d ops): %7.2f ns/op\n",
+			N,
+			bench([&] { sink_f = (float)(a + 1); })); print(buf);
+		sprintf(buf,
+			"sub SF-int(%6d ops): %7.2f ns/op\n",
+			N,
+			bench([&] { sink_f = (float)(a - 1); })); print(buf);
+
+		// Comparison mixed
+		sprintf(buf,
+			"cmp SF<int(%6d ops): %7.2f ns/op\n",
+			N,
+			bench([&] { sink_b = (a < 5); })); print(buf);
+		sprintf(buf,
+			"cmp int<SF(%6d ops): %7.2f ns/op\n",
+			N,
+			bench([&] { sink_b = (3 < a); })); print(buf);
+
+		// Compound assignment with MulExpr
+		sprintf(buf,
+			"+= mul_expr(%5d ops): %7.2f ns/op\n",
+			N,
+			bench([&] { SoftFloat tmp(5.f); tmp += two * three; sink_f = (float)tmp; })); print(buf);
+		sprintf(buf,
+			"-= mul_expr(%5d ops): %7.2f ns/op\n",
+			N,
+			bench([&] { SoftFloat tmp(10.f); tmp -= two * three; sink_f = (float)tmp; })); print(buf);
+
+		// MulExpr chaining (example: (a*b).sqrt())
+		sprintf(buf,
+			"MulExpr.sqrt(%4d ops): %7.2f ns/op\n",
+			N,
+			bench([&] { sink_f = (float)((a * b).sqrt()); })); print(buf);
+		
 		(void)sink_f; (void)sink_i; (void)sink_b;
 	}
 
@@ -1783,6 +1884,151 @@ namespace SoftFloatTest {
 		return ok;
 	}
 
+	// -----------------------------------------------------------------------
+// Reciprocal
+// -----------------------------------------------------------------------
+	static bool test_reciprocal() {
+		bool ok = true;
+		struct { float x, ex; } cases[] = {
+			{ 2.f, 0.5f },
+			{ 4.f, 0.25f },
+			{ 0.5f, 2.f },
+			{ 10.f, 0.1f },
+			{ 1.f, 1.f }
+		};
+		for (auto& c : cases) {
+			float got = (float)SoftFloat(c.x).reciprocal();
+			if (!approx(got, c.ex, 64, 1e-3f)) {
+				char b[128]; snprintf(b, sizeof b, "  reciprocal(%.4g)=%.6g exp %.6g\n", (double)c.x, (double)got, (double)c.ex);
+				print(b); ok = false;
+			}
+		}
+		// free function
+		ok &= chk(approx((float)reciprocal(SoftFloat(8.f)), 0.125f, 64, 1e-3f), "free reciprocal");
+		return ok;
+	}
+
+	// -----------------------------------------------------------------------
+	// Unary plus
+	// -----------------------------------------------------------------------
+	static bool test_unary_plus() {
+		SoftFloat a(5.f), b(-3.f), z(0.f);
+		bool ok = true;
+		ok &= chk((float)(+ a) == 5.f, "+5 == 5");
+		ok &= chk((float)(+ b) == -3.f, "+(-3) == -3");
+		ok &= chk((+ z).is_zero(), "+0 is zero");
+		return ok;
+	}
+
+	// -----------------------------------------------------------------------
+	// atan() member
+	// -----------------------------------------------------------------------
+	static bool test_atan_member() {
+		bool ok = true;
+		float vals[] = { -2.f, -1.f, 0.f, 1.f, 2.f };
+		for (float v : vals) {
+			float got = (float)SoftFloat(v).atan();
+			float ex = atanf(v);
+			if (!approx(got, ex, 256, 2e-3f)) {
+				char b[128]; snprintf(b, sizeof b, "  atan(%.4g): got %.6g exp %.6g\n", (double)v, (double)got, (double)ex);
+				print(b); ok = false;
+			}
+		}
+		return ok;
+	}
+
+	// -----------------------------------------------------------------------
+	// sin cos pair (sincos) without epsilon test
+	// -----------------------------------------------------------------------
+	static bool test_sincos_direct() {
+		bool ok = true;
+		SoftFloat x = SoftFloat::half_pi();
+		auto[s, c] = x.sincos();
+		ok &= chk(approx((float)s, 1.f, 256, 1e-3f), "sincos sin");
+		ok &= chk(fabsf((float)c) < 1e-3f, "sincos cos");
+		// Free function
+		auto[s2, c2] = sincos(SoftFloat::pi());
+		ok &= chk(fabsf((float)s2) < 1e-3f, "free sincos sin(pi) ≈ 0");
+		ok &= chk(approx((float)c2, -1.f, 256, 1e-3f), "free sincos cos(pi) ≈ -1");
+		return ok;
+	}
+
+	// -----------------------------------------------------------------------
+	// Mixed-type arithmetic / comparison operators (runtime)
+	// -----------------------------------------------------------------------
+	static bool test_mixed_operators() {
+		bool ok = true;
+		SoftFloat a(3.f);
+		// Addition
+		ok &= approx((float)(a + 2.5f), 5.5f, 8);
+		ok &= approx((float)(2.5f + a), 5.5f, 8);
+		ok &= approx((float)(a + 4), 7.0f, 8);
+		ok &= approx((float)(4 + a), 7.0f, 8);
+		// Subtraction
+		ok &= approx((float)(a - 0.5f), 2.5f, 8);
+		ok &= approx((float)(5.0f - a), 2.0f, 8);
+		ok &= approx((float)(a - 1), 2.0f, 8);
+		ok &= approx((float)(10 - a), 7.0f, 8);
+		// Multiplication
+		ok &= approx((float)(a * 2.0f), 6.0f, 8);
+		ok &= approx((float)(2.0f * a), 6.0f, 8);
+		ok &= approx((float)(a * 2), 6.0f, 8);
+		ok &= approx((float)(2 * a), 6.0f, 8);
+		// Division
+		ok &= approx((float)(a / 2.0f), 1.5f, 16, 1e-3f);
+		ok &= approx((float)(12.0f / a), 4.0f, 16, 1e-3f);
+		ok &= approx((float)(a / 2), 1.5f, 16, 1e-3f);
+		ok &= approx((float)(12 / a), 4.0f, 16, 1e-3f);
+		// Comparisons
+		ok &= chk(SoftFloat(5.f) == 5.0f, "== float");
+		ok &= chk(5 == SoftFloat(5.f), "== int");
+		ok &= chk(SoftFloat(5.f) == 5, "== int rhs");
+		ok &= chk(SoftFloat(4.f) < 5.0f, "< float");
+		ok &= chk(5.0f > SoftFloat(4.f), "> float");
+		ok &= chk(SoftFloat(4.f) <= 4, "<= int");
+		ok &= chk(4 <= SoftFloat(4.f), "<= int lhs");
+		ok &= chk(SoftFloat(4.f) >= 4.0f, ">= float");
+		return ok;
+	}
+
+	// -----------------------------------------------------------------------
+	// Compound assignment with MulExpr (runtime, to complement static test)
+	// -----------------------------------------------------------------------
+	static bool test_mulexpr_compound_assign() {
+		SoftFloat a(5.f);
+		a += SoftFloat(2.f) * SoftFloat(3.f); // 5 + 6 = 11
+		bool ok = approx((float)a, 11.f, 16);
+		a -= SoftFloat(1.f) * SoftFloat(4.f); // 11 - 4 = 7
+		ok &= approx((float)a, 7.f, 16);
+		return ok;
+	}
+
+	// -----------------------------------------------------------------------
+	// MulExpr chained calls (sqrt, exp, etc.)
+	// -----------------------------------------------------------------------
+	static bool test_mulexpr_chaining() {
+		SoftFloat two(2.f);
+		// (2*2).sqrt() == 2
+		auto prod = two * two;
+		float s = (float)prod.sqrt();
+		bool ok = approx(s, 2.f, 16);
+		// (2*3).log2() ≈ 2.5849...
+		float l2 = (float)(two * SoftFloat(3.f)).log2();
+		ok &= approx(l2, log2f(6.f), 512, 1e-3f);
+		// (0.5 * 2).exp() == exp(1)
+		float e = (float)(SoftFloat(0.5f) * SoftFloat(4.f)).exp();
+		ok &= approx(e, expf(2.f), 512, 2e-3f);
+		return ok;
+	}
+
+	// -----------------------------------------------------------------------
+	// User-defined literal
+	// -----------------------------------------------------------------------
+	static bool test_literals() {
+		auto a = 2.5_sf;
+		auto b = 42_sf;
+		return approx((float)a, 2.5f) && approx((float)b, 42.f);
+	}
 
 	struct TC { const char* name; bool(*fn)(); };
 	static const TC tests[] = {
@@ -1840,6 +2086,14 @@ namespace SoftFloatTest {
 		{"rounding", test_rounding},
 		{"hyperbolic", test_hyperbolic},
 		{"copysign/fmod", test_copysign_fmod},
+		{"Reciprocal", test_reciprocal},
+		{"Unary Plus", test_unary_plus},
+		{"atan member", test_atan_member},
+		{"sincos direct", test_sincos_direct},
+		{"Mixed Operators", test_mixed_operators},
+		{"MulExpr compound assign", test_mulexpr_compound_assign},
+		{"MulExpr chaining", test_mulexpr_chaining},
+		{"User Literals", test_literals},
 		{"Random Stress Test",          []() { return test_stress(500); }},
 	};
 

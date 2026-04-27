@@ -3124,3 +3124,83 @@ static_assert([]() consteval {
 	SoftFloat r2 = fused_mul_add(a, b, c);
 	return r1 == r2;
 }());
+
+// Missing constants
+static_assert(SoftFloat::three().to_float() == 3.0f, "three == 3");
+static_assert(SoftFloat::four().to_float() == 4.0f, "four == 4");
+
+// Unary plus is identity
+static_assert((+SoftFloat::one()).to_float() == 1.0f, "+one == 1");
+static_assert((+SoftFloat::neg_one()).to_float() == -1.0f, "+neg_one == -1");
+
+// Reciprocal
+static_assert(ct_approx(SoftFloat::two().reciprocal().to_float(), 0.5f), "recip(2) ≈ 0.5");
+static_assert((SoftFloat::half().reciprocal()).to_float() == 2.0f, "recip(0.5) == 2");
+static_assert(reciprocal(SoftFloat::two()).to_float() == 0.5f, "free recip(2) == 0.5");
+
+// atan (member)
+static_assert(SoftFloat::zero().atan().to_float() == 0.0f, "atan(0) == 0");
+static_assert(ct_approx(SoftFloat::one().atan().to_float(), SoftFloat::pi().to_float() / 4.0f, 256),
+	"atan(1) ≈ pi/4");
+
+// Mixed-type addition / subtraction / multiplication / division (with int/float)
+static_assert((SoftFloat::one() + 2.0f).to_float() == 3.0f, "1 + 2.0f == 3");
+static_assert((3.0f + SoftFloat::two()).to_float() == 5.0f, "3.0f + 2 == 5");
+static_assert((SoftFloat::two() - 1).to_float() == 1.0f, "2 - 1 == 1");
+static_assert((5 - SoftFloat::three()).to_float() == 2.0f, "5 - 3 == 2");
+static_assert((SoftFloat::three() * 2.0f).to_float() == 6.0f, "3 * 2.0f == 6");
+static_assert((4.0f * SoftFloat::one()).to_float() == 4.0f, "4.0f * 1 == 4");
+static_assert((SoftFloat::one() * 10).to_float() == 10.0f, "1 * 10 == 10");
+static_assert((10 * SoftFloat::one()).to_float() == 10.0f, "10 * 1 == 10");
+static_assert(ct_approx((SoftFloat(12.0f) / 3).to_float(), 4.0f, 4), "12 / 3 ≈ 4");
+static_assert(ct_approx((15.0f / SoftFloat::three()).to_float(), 5.0f, 4), "15.0f / 3 ≈ 5");
+
+// Mixed comparisons
+static_assert(SoftFloat::one() == 1.0f, "1 == 1.0f");
+static_assert(1 == SoftFloat::one(), "1 == 1 (int)");
+static_assert(SoftFloat::two() > 1.9f, "2 > 1.9");
+static_assert(2 < SoftFloat::three(), "2 < 3");
+static_assert(SoftFloat::neg_one() <= 0, "-1 <= 0");
+static_assert(-1 <= SoftFloat::zero(), "-1 <= 0");
+static_assert(SoftFloat::one() >= 0.5f, "1 >= 0.5");
+
+// Assignment operators
+static_assert([]() consteval {
+	SoftFloat a;
+	a = 42;          return a.to_float() == 42.0f;
+	}(), "assign int");
+static_assert([]() consteval {
+	SoftFloat a;
+	a = 3.125f;      return a.to_float() == 3.125f;
+	}(), "assign float");
+static_assert([]() consteval {
+	SoftFloat a;
+	a = int16_t(7);  return a.to_float() == 7.0f;
+	}(), "assign int16_t");
+
+// Compound assignment with MulExpr
+static_assert([]() consteval {
+	SoftFloat a(5.0f);
+	a += SoftFloat::two() * SoftFloat::three();  // 5 + 6 = 11
+	return a.to_float() == 11.0f;
+	}(), "+= mul_expr");
+static_assert([]() consteval {
+	SoftFloat a(20.0f);
+	a -= SoftFloat::two() * SoftFloat::three();  // 20 - 6 = 14
+	return a.to_float() == 14.0f;
+	}(), "-= mul_expr");
+
+// MulExpr chaining: (a*b).sqrt(), etc.
+static_assert(ct_approx(
+	(SoftFloat::two()* SoftFloat::two()).sqrt().to_float(),
+	2.0f, 4), "(2*2).sqrt() == 2");
+static_assert(ct_approx(
+	(SoftFloat::two()* SoftFloat::three()).exp().to_float(),
+	expf(6.0f), 1024), "(2*3).exp() ≈ exp(6)");
+static_assert(ct_approx(
+	(SoftFloat::two()* SoftFloat::four()).log2().to_float(),
+	3.0f, 512), "(2*4).log2() == 3");
+
+// User-defined literal
+static_assert((1.5_sf).to_float() == 1.5f, "1.5_sf literal");
+static_assert((3_sf).to_float() == 3.0f, "3_sf literal");
