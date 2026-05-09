@@ -42,6 +42,7 @@
 #   define SF_CONST     __attribute__((const))
 #   define LIKELY(x)    __builtin_expect(!!(x), 1)
 #   define UNLIKELY(x)  __builtin_expect(!!(x), 0)
+#   define IS_CONST(x)  __builtin_constant_p(x)
 #else
 #   define SF_INLINE    inline
 #   define SF_NOINLINE
@@ -51,6 +52,7 @@
 #   define SF_CONST
 #   define LIKELY(x)    (x)
 #   define UNLIKELY(x)  (x)
+#   define IS_CONST(x)  0
 #endif
 
 // =========================================================================
@@ -925,6 +927,13 @@ public:
 	[[nodiscard]] constexpr bool is_zero()     const noexcept { return mantissa == 0; }
 	[[nodiscard]] constexpr bool is_negative() const noexcept { return mantissa < 0; }
 	[[nodiscard]] constexpr bool is_positive() const noexcept { return mantissa > 0; }
+	[[nodiscard]] constexpr bool is_power_of_two() const noexcept {
+		// positive power of two
+		return mantissa == static_cast<int32_t>(MANT_MIN);
+	}
+	[[nodiscard]] constexpr bool is_neg_power_of_two() const noexcept {
+		return mantissa == -static_cast<int32_t>(MANT_MIN);
+	}
 
 	// ------------------------------------------------------------------
 	// abs — constexpr, branch-free (ASR+EOR+SUB on ARM)
@@ -1032,6 +1041,26 @@ struct SoftFloat::MulExpr {
 	SoftFloat rhs;
 
 	[[nodiscard]] constexpr SF_INLINE SoftFloat eval() const noexcept {
+#if 0
+		// Optimizations when values are known at compile time - Disabled, as they increase code size and prevent some optimizations in the caller (e.g. constant folding of the whole expression).
+		if (IS_CONST(lhs)) {
+			if (lhs.is_power_of_two()) {
+				return rhs << (lhs.exponent + SoftFloat::MANT_BITS);
+			}
+			if (lhs.is_neg_power_of_two()) {
+				return -(rhs << (lhs.exponent + SoftFloat::MANT_BITS));
+			}
+		}
+		if (IS_CONST(rhs)) {
+			if (rhs.is_power_of_two()) {
+				return lhs << (rhs.exponent + SoftFloat::MANT_BITS);
+			}
+			if (rhs.is_neg_power_of_two()) {
+				return -(lhs << (rhs.exponent + SoftFloat::MANT_BITS));
+			}
+		}
+		// fallback to normal multiplication
+#endif
 		return SoftFloat::mul_plain(lhs, rhs);
 	}
 
@@ -2820,7 +2849,7 @@ constexpr SoftFloat SoftFloat::fmod(SoftFloat y) const noexcept {
 			// pow2_mod = (pow2_mod * base) % ay
 			uint64_t prod = static_cast<uint64_t>(pow2_mod) * base;
 			uint32_t q, rem;
-			if !consteval {
+			if (!SF_IS_CONSTEVAL()) {
 				__asm__("umull %0, %1, %2, %3"
 					: "=&r"(rem), "=&r"(q)   // lo = rem, hi = q
 					: "r"(pow2_mod), "r"(base));
@@ -2837,7 +2866,7 @@ constexpr SoftFloat SoftFloat::fmod(SoftFloat y) const noexcept {
 		// base = (base * base) % ay
 		{
 			uint64_t sq = static_cast<uint64_t>(base) * base;
-			if !consteval {
+			if (!SF_IS_CONSTEVAL()) {
 				uint32_t sq_lo, sq_hi;
 				__asm__("umull %0, %1, %2, %3"
 					: "=&r"(sq_lo), "=&r"(sq_hi)
@@ -2857,7 +2886,7 @@ constexpr SoftFloat SoftFloat::fmod(SoftFloat y) const noexcept {
 	// Final result = (ax_mod * pow2_mod) % ay
 	uint64_t final_prod = static_cast<uint64_t>(ax_mod) * pow2_mod;
 	uint32_t r;
-	if !consteval {
+	if (!SF_IS_CONSTEVAL()) {
 		uint32_t lo, hi;
 		__asm__("umull %0, %1, %2, %3"
 			: "=&r"(lo), "=&r"(hi)
