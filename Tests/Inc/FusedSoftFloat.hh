@@ -2849,6 +2849,7 @@ constexpr SoftFloat SoftFloat::fmod(SoftFloat y) const noexcept {
 			// pow2_mod = (pow2_mod * base) % ay
 			uint64_t prod = static_cast<uint64_t>(pow2_mod) * base;
 			uint32_t q, rem;
+#ifdef __arm__
 			if (!SF_IS_CONSTEVAL()) {
 				__asm__("umull %0, %1, %2, %3"
 					: "=&r"(rem), "=&r"(q)   // lo = rem, hi = q
@@ -2859,13 +2860,16 @@ constexpr SoftFloat SoftFloat::fmod(SoftFloat y) const noexcept {
 				uint64_t combined = (static_cast<uint64_t>(r_lo_part) << 32) | rem;
 				pow2_mod = static_cast<uint32_t>(combined % ay);
 			}
-			else {
+			else 
+#endif
+			{
 				pow2_mod = static_cast<uint32_t>(prod % ay);
 			}
 		}
 		// base = (base * base) % ay
 		{
 			uint64_t sq = static_cast<uint64_t>(base) * base;
+#ifdef __arm__
 			if (!SF_IS_CONSTEVAL()) {
 				uint32_t sq_lo, sq_hi;
 				__asm__("umull %0, %1, %2, %3"
@@ -2876,7 +2880,9 @@ constexpr SoftFloat SoftFloat::fmod(SoftFloat y) const noexcept {
 				uint64_t combined = (static_cast<uint64_t>(r_lo_part) << 32) | sq_lo;
 				base = static_cast<uint32_t>(combined % ay);
 			}
-			else {
+			else 
+#endif
+			{
 				base = static_cast<uint32_t>(sq % ay);
 			}
 		}
@@ -2886,6 +2892,7 @@ constexpr SoftFloat SoftFloat::fmod(SoftFloat y) const noexcept {
 	// Final result = (ax_mod * pow2_mod) % ay
 	uint64_t final_prod = static_cast<uint64_t>(ax_mod) * pow2_mod;
 	uint32_t r;
+#ifdef __arm__
 	if (!SF_IS_CONSTEVAL()) {
 		uint32_t lo, hi;
 		__asm__("umull %0, %1, %2, %3"
@@ -2896,7 +2903,9 @@ constexpr SoftFloat SoftFloat::fmod(SoftFloat y) const noexcept {
 		uint64_t combined = (static_cast<uint64_t>(r_lo_part) << 32) | lo;
 		r = static_cast<uint32_t>(combined % ay);
 	}
-	else {
+	else 
+#endif
+	{
 		r = static_cast<uint32_t>(final_prod % ay);
 	}
 
